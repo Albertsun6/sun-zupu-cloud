@@ -19,13 +19,14 @@ begin
     raise exception '不是有效的族谱备份 JSON(缺 persons)';
   end if;
 
-  delete from public.media;
-  delete from public.marriages;
-  delete from public.persons;
-  delete from public.narratives;
-  delete from public.verify;
-  delete from public.transcription;
-  delete from public.meta;
+  -- 加 where true:绕过 Supabase 的安全删除保护(pg_safeupdate 禁止无 WHERE 的 DELETE)
+  delete from public.media where true;
+  delete from public.marriages where true;
+  delete from public.persons where true;
+  delete from public.narratives where true;
+  delete from public.verify where true;
+  delete from public.transcription where true;
+  delete from public.meta where true;
 
   insert into public.meta(key, value) values ('meta', coalesce(payload->'meta','{}'::jsonb));
 
