@@ -216,6 +216,38 @@ async function undo(hid){
   return { ok:true, summary:summ };
 }
 
+// ---------- 关系(通用人际关系:有类型有方向的边)----------
+let _relTypesCache = null;
+async function listRelTypes(){
+  if(_relTypesCache) return _relTypesCache;
+  _relTypesCache = must(await sb.from("relationship_types").select("*").order("sort_order").order("type"));
+  return _relTypesCache;
+}
+async function listRelationships(){ return must(await sb.from("relationships").select("*").order("id")); }
+async function relationsOf(pid){ return must(await sb.from("relationships").select("*").or("from_id.eq."+pid+",to_id.eq."+pid)); }
+async function addRelationship(body){
+  let from_id=body.from_id, to_id=body.to_id;
+  if(!from_id||!to_id) throw new Error("请选择两个人");
+  if(from_id===to_id) throw new Error("不能和自己建立关系");
+  const t=(await listRelTypes()).find(x=>x.type===body.type);
+  const directed = t ? !t.is_symmetric : true;
+  if(!directed && from_id>to_id){ const x=from_id; from_id=to_id; to_id=x; }   // 对称边规范序
+  const rec={ from_id, to_id, type:body.type, directed, start_date:body.start_date||"", end_date:body.end_date||"", note:body.note||"" };
+  const row=must(await sb.from("relationships").insert(rec).select().single());
+  await logHist("create","relationship",row.id,"新增关系: "+((t&&t.label_zh)||body.type)+" "+from_id+"→"+to_id);
+  return row;
+}
+async function updateRelationship(id, body){
+  const patch={}; ["type","start_date","end_date","note"].forEach(k=>{ if(k in body) patch[k]=body[k]; });
+  const row=must(await sb.from("relationships").update(patch).eq("id",id).select().single());
+  await logHist("update","relationship",id,"修改关系"); return row;
+}
+async function delRelationship(id){
+  must(await sb.from("relationships").delete().eq("id",id));
+  await logHist("delete","relationship",id,"删除关系"); return { ok:true };
+}
+window.REL = { types:listRelTypes, all:listRelationships, of:relationsOf, add:addRelationship, update:updateRelationship, del:delRelationship };
+
 // ---------- REST 兼容 shim:让 app.js 的 api() 调用零改动 ----------
 async function api(method, path, body){
   const u = new URL(path, location.origin); const p = u.pathname; method = method.toUpperCase();
@@ -289,7 +321,9 @@ async function fullData(redact){
   allMarr.forEach(m=>(mByP[m.person_id]=mByP[m.person_id]||[]).push(m));
   allMedia.forEach(m=>(mdByP[m.person_id]=mdByP[m.person_id]||[]).push(m));
   persons.forEach(p=>{ if(redact){p.contact="";p.address="";} p.marriages=mByP[p.id]||[]; p.media=mdByP[p.id]||[]; });
-  return { meta, persons, narratives, verify, transcription, _redacted:!!redact };
+  const relationships = must(await sb.from("relationships").select("*").order("id"));
+  const relationship_types = must(await sb.from("relationship_types").select("*").order("sort_order"));
+  return { meta, persons, narratives, verify, transcription, relationships, relationship_types, _redacted:!!redact };
 }
 async function exportJson(redact){ const d=await fullData(redact); download(redact?"zupu-share.json":"zupu-backup.json", JSON.stringify(d,null,2), "application/json"); }
 async function exportCsv(redact){

@@ -414,8 +414,27 @@ async function openDetail(p){
     html+=`<div class="dsec"><div class="dsec-h">相册</div><div class="dalbum">`
       +media.map(md=>`<figure><img loading="lazy" src="${esc(window.photoUrl(md.path))}"><figcaption>${esc(md.caption||"")}</figcaption></figure>`).join("")+`</div></div>`;
   }
+  // 通用关系网(夫妻/同事/朋友/师生… + 从族谱迁来的父子)
+  const rtMap={}; (await window.REL.types().catch(()=>[])).forEach(t=>rtMap[t.type]=t);
+  const rels=await window.REL.of(p.id).catch(()=>[]);
+  if(rels.length){
+    const byCat={};
+    rels.forEach(r=>{
+      const t=rtMap[r.type]||{label_zh:r.type,category:"其他"};
+      const fromMe=r.from_id===p.id, other=fromMe?r.to_id:r.from_id, op=byId(other); if(!op) return;
+      const lab=r.directed?(fromMe?(t.forward_label||t.label_zh):(t.inverse_label||t.label_zh)):t.label_zh;
+      (byCat[t.category||"其他"]=byCat[t.category||"其他"]||[]).push({r,op,lab,color:t.color});
+    });
+    let rh="";
+    Object.keys(byCat).forEach(cat=>{
+      rh+=`<div class="hint" style="margin:.4rem 0 .1rem">${esc(cat)}</div>`;
+      byCat[cat].forEach(it=>{ rh+=`<div class="ditem"><span class="reltag" style="border-color:${esc(it.color||'#cbd5e1')};color:${esc(it.color||'#475569')}">${esc(it.lab)}</span> <a class="plink" data-pid="${esc(it.op.id)}">${esc(it.op.name||'(无名)')}</a>${state.canEdit?` <button class="btn btn-sm reldel" data-rid="${it.r.id}" title="删除此关系">✕</button>`:""}</div>`; });
+    });
+    html+=`<div class="dsec"><div class="dsec-h">关系网(${rels.length})</div>${rh}</div>`;
+  }
   box.innerHTML=html;
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });
+  box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?"))return; try{ await window.REL.del(+b.dataset.rid); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
   $("#detailMask").classList.add("open");
 }
 
@@ -504,6 +523,78 @@ async function uploadMedia(file){
   }catch(e){ $("#modalErr").textContent="上传失败:"+e.message; }
 }
 
+/* ---------- 关系(通用人际关系):列表 + 增改删 ---------- */
+function personOptions(sel){
+  return state.persons.filter(p=>!p.deleted)
+    .sort((a,b)=>(parseInt(a.gen)||0)-(parseInt(b.gen)||0)||(a.sort_order||0)-(b.sort_order||0))
+    .map(p=>`<option value="${esc(p.id)}"${p.id===sel?" selected":""}>${esc(p.name||"(无名)")} — ${esc(p.id)}</option>`).join("");
+}
+async function renderRelations(){
+  const box=$("#relationsBox"); if(!box) return;
+  const types=await window.REL.types().catch(()=>[]);
+  const rels=await window.REL.all().catch(()=>[]);
+  const tmap={}; types.forEach(t=>tmap[t.type]=t);
+  const typeOpts=types.map(t=>`<option value="${esc(t.type)}">${esc(t.label_zh)}(${esc(t.category||"")})</option>`).join("");
+  const pOpts=personOptions();
+  const form = state.canEdit ? `<div class="relform">
+      <select id="rf_from" title="人A">${pOpts}</select>
+      <select id="rf_type" title="关系">${typeOpts}</select>
+      <select id="rf_to" title="人B">${pOpts}</select>
+      <input id="rf_start" placeholder="起(可空)" style="width:100px">
+      <input id="rf_note" placeholder="备注(可空)">
+      <button class="btn btn-primary btn-sm" id="rf_add">+ 添加关系</button>
+      <span class="hint" id="rf_msg"></span>
+    </div>` : `<p class="note">只读账号可查看关系;编辑需 editor 账号。</p>`;
+  const rows=rels.map(r=>{
+    const t=tmap[r.type]||{label_zh:r.type,color:"#999"}; const a=byId(r.from_id), b=byId(r.to_id); if(!a||!b) return "";
+    return `<div class="relrow"><a class="plink" data-pid="${esc(a.id)}">${esc(a.name||"(无名)")}</a>`
+      +`<span class="reltag" style="border-color:${esc(t.color)};color:${esc(t.color)}">${esc(t.label_zh)}</span>${r.directed?"→":"—"}`
+      +`<a class="plink" data-pid="${esc(b.id)}">${esc(b.name||"(无名)")}</a>`
+      +(r.start_date?`<span class="hint"> · ${esc(r.start_date)}</span>`:"")+(r.note?`<span class="hint"> · ${esc(r.note)}</span>`:"")
+      +(state.canEdit?` <button class="btn btn-sm reldel" data-rid="${r.id}">删除</button>`:"")+`</div>`;
+  }).join("");
+  box.innerHTML=form+`<div class="hint" style="margin:.6rem 0">共 ${rels.length} 条关系(含从族谱迁来的父子)</div>`+(rows||"<p class='hint'>还没有关系。</p>");
+  box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });
+  box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?"))return; try{ await window.REL.del(+b.dataset.rid); renderRelations(); }catch(e){ alert(e.message);} });
+  if(state.canEdit) $("#rf_add").onclick=async()=>{
+    const msg=$("#rf_msg");
+    try{ await window.REL.add({from_id:$("#rf_from").value,to_id:$("#rf_to").value,type:$("#rf_type").value,start_date:$("#rf_start").value.trim(),note:$("#rf_note").value.trim()});
+      renderRelations(); }
+    catch(e){ msg.textContent="失败:"+e.message; }
+  };
+}
+
+/* ---------- 关系图谱(ECharts,懒加载 CDN)---------- */
+let _echarts=null, _graphChart=null;
+async function getECharts(){ if(!_echarts) _echarts=await import("https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.esm.min.mjs"); return _echarts; }
+async function renderGraph(){
+  const box=$("#graphBox"); if(!box) return;
+  box.innerHTML="<p class='note' style='padding:1rem'>加载关系图谱…</p>";
+  let echarts,rels,types;
+  try{ echarts=await getECharts(); rels=await window.REL.all(); types=await window.REL.types(); }
+  catch(e){ box.innerHTML="<p style='padding:1rem;color:#b91c1c'>图谱加载失败:"+esc(e.message)+"</p>"; return; }
+  const tmap={}; types.forEach(t=>tmap[t.type]=t);
+  const persons=state.persons.filter(p=>!p.deleted); const idset=new Set(persons.map(p=>p.id));
+  const deg={}; rels.forEach(r=>{ if(idset.has(r.from_id))deg[r.from_id]=(deg[r.from_id]||0)+1; if(idset.has(r.to_id))deg[r.to_id]=(deg[r.to_id]||0)+1; });
+  const nodes=persons.map(p=>({ id:p.id, name:p.name||"(无名)", symbolSize:Math.min(48,18+(deg[p.id]||0)*4),
+    value:(p.char_gen&&p.char_gen!=="—"?p.char_gen+"字辈·":"")+"第"+(p.gen||"?")+"代", itemStyle:{color:p.alive==="是"?"#10b981":"#64748b"} }));
+  const links=rels.filter(r=>idset.has(r.from_id)&&idset.has(r.to_id)).map(r=>{ const t=tmap[r.type]||{};
+    return { source:r.from_id, target:r.to_id, value:t.label_zh||r.type,
+      lineStyle:{color:t.color||"#94a3b8",width:1.5,curveness:0.06,opacity:0.75}, symbol:r.directed?["none","arrow"]:["none","none"], symbolSize:7 }; });
+  const legend=$("#graphLegend"); if(legend) legend.innerHTML=`<span class="leg"><i style="background:#10b981;width:10px;height:10px;border-radius:50%"></i>在世</span><span class="leg"><i style="background:#64748b;width:10px;height:10px;border-radius:50%"></i>已故</span>`+types.map(t=>`<span class="leg"><i style="background:${esc(t.color)}"></i>${esc(t.label_zh)}</span>`).join("");
+  box.innerHTML=""; box.style.height="72vh";
+  if(_graphChart){ try{_graphChart.dispose();}catch(e){} }
+  _graphChart=echarts.init(box);
+  _graphChart.setOption({
+    tooltip:{ formatter:pp=> pp.dataType==="edge" ? esc(pp.data.value) : "<b>"+esc(pp.data.name)+"</b><br>"+esc(pp.data.value) },
+    series:[{ type:"graph", layout:"force", roam:true, draggable:true, force:{repulsion:230,edgeLength:95,gravity:0.08},
+      label:{show:true,position:"right",fontSize:11,fontFamily:'"PingFang SC","Noto Sans SC",sans-serif',color:"#0f172a"},
+      emphasis:{focus:"adjacency",lineStyle:{width:3}}, lineStyle:{color:"#94a3b8"}, data:nodes, links:links }]
+  });
+  _graphChart.on("click", pp=>{ if(pp.dataType==="node"){ const t=byId(pp.data.id); if(t) openDetail(t); } });
+}
+window.addEventListener("resize", ()=>{ const v=document.getElementById("view-graph"); if(_graphChart&&v&&v.classList.contains("active")) _graphChart.resize(); });
+
 /* ---------- 标签切换 ---------- */
 function switchView(name){
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.view===name));
@@ -511,6 +602,8 @@ function switchView(name){
   $("#view-"+name).classList.add("active");
   if(location.hash!=="#"+name) location.hash=name;
   if(name==="tree") renderTree();
+  if(name==="relations") renderRelations();
+  if(name==="graph") renderGraph();
   if(name==="trash") renderTrash();
   if(name==="health") renderHealth();
   if(name==="log"){ renderBackup(); renderLog(); }

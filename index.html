@@ -29,6 +29,8 @@
   <nav class="tabs">
     <button class="tab active" data-view="overview">世系总览</button>
     <button class="tab" data-view="tree">家族树</button>
+    <button class="tab" data-view="relations">关系</button>
+    <button class="tab" data-view="graph">关系图谱</button>
     <button class="tab" data-view="history">家史</button>
     <button class="tab" data-view="verify">待核实</button>
     <button class="tab" data-view="health">数据体检</button>
@@ -48,6 +50,15 @@
     <p class="note">家族树由“父ID”自动生成;实线=明确父子。改了人物父ID,回本页自动刷新。绿色=本谱直系。
       <button class="btn btn-sm" id="reTree">刷新树图</button></p>
     <div id="treeBox">加载中…</div>
+  </section>
+  <section class="view" id="view-relations">
+    <p class="note">管理任意人之间的关系(不止父子:夫妻/同事/朋友/师生…)。从族谱迁来的父子关系已在此。点姓名查看其人。</p>
+    <div id="relationsBox"></div>
+  </section>
+  <section class="view" id="view-graph">
+    <p class="note">关系图谱:节点=人(绿=在世),边=关系(按类型上色);拖拽/滚轮缩放,悬停高亮相邻,点节点看详情。家族树标签仍看纯父子世系。</p>
+    <div id="graphLegend" class="graphlegend"></div>
+    <div id="graphBox" style="height:72vh"></div>
   </section>
   <section class="view" id="view-history"><div id="historyNar"></div></section>
   <section class="view" id="view-verify">

@@ -69,6 +69,25 @@ begin
   select t->>'page', coalesce(t->>'label',''), coalesce(t->>'text',''), coalesce((t->>'sort_order')::int,0)
   from jsonb_array_elements(coalesce(payload->'transcription','[]'::jsonb)) t;
 
+  -- 关系类型(备份若含则 upsert,保留自定义类型;不删现有,避免 relationships FK 失效)
+  insert into public.relationship_types(type,label_zh,forward_label,inverse_label,is_symmetric,category,color,sort_order)
+  select rt->>'type', coalesce(rt->>'label_zh',''), coalesce(rt->>'forward_label',''), coalesce(rt->>'inverse_label',''),
+         coalesce((rt->>'is_symmetric')::boolean,false), coalesce(rt->>'category',''), coalesce(rt->>'color',''), coalesce((rt->>'sort_order')::int,0)
+  from jsonb_array_elements(coalesce(payload->'relationship_types','[]'::jsonb)) rt
+  on conflict (type) do update set label_zh=excluded.label_zh, forward_label=excluded.forward_label,
+    inverse_label=excluded.inverse_label, is_symmetric=excluded.is_symmetric, category=excluded.category,
+    color=excluded.color, sort_order=excluded.sort_order;
+
+  -- 关系边(persons 重灌后再插;truncate persons 已 cascade 清空旧关系)。跳过端点/类型缺失的边,防 FK 报错。
+  insert into public.relationships(from_id,to_id,type,directed,start_date,end_date,note)
+  select r->>'from_id', r->>'to_id', r->>'type', coalesce((r->>'directed')::boolean,true),
+         coalesce(r->>'start_date',''), coalesce(r->>'end_date',''), coalesce(r->>'note','')
+  from jsonb_array_elements(coalesce(payload->'relationships','[]'::jsonb)) r
+  where exists(select 1 from public.persons p where p.id=r->>'from_id')
+    and exists(select 1 from public.persons p where p.id=r->>'to_id')
+    and exists(select 1 from public.relationship_types t where t.type=r->>'type')
+  on conflict (from_id,to_id,type) do nothing;
+
   insert into public.history(ts,action,entity,entity_id,summary)
   values (to_char(now(),'YYYY-MM-DD HH24:MI:SS'),'import','db','-',
           '导入JSON恢复,人物 ' || jsonb_array_length(payload->'persons'));
