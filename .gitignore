@@ -1,0 +1,12 @@
+# 绝不提交:密钥、数据、备份
+.env
+.env.*
+*service_role*
+*.db
+*.sqlite
+migration-data/
+zupu-export*.json
+# 杂项
+node_modules/
+*.log
+.DS_Store

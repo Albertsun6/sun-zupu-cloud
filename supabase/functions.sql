@@ -1,0 +1,83 @@
+-- =====================================================================
+-- 孙氏族谱 · RPC 函数
+-- 在 schema.sql / policies.sql 之后运行。
+-- import_full:原子「导入/恢复」——清空全部表后从导出 JSON 重灌(对应本地版 import_full_json)。
+--   仅 editor 可调用;仅恢复数据图,不恢复 Storage 图片(图片需另行上传)。
+-- =====================================================================
+create or replace function public.import_full(payload jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare p jsonb; pid text;
+begin
+  if (auth.jwt() #>> '{app_metadata,role}') <> 'editor' then
+    raise exception '需要 editor 权限';
+  end if;
+  if not (payload ? 'persons') then
+    raise exception '不是有效的族谱备份 JSON(缺 persons)';
+  end if;
+
+  delete from public.media;
+  delete from public.marriages;
+  delete from public.persons;
+  delete from public.narratives;
+  delete from public.verify;
+  delete from public.transcription;
+  delete from public.meta;
+
+  insert into public.meta(key, value) values ('meta', coalesce(payload->'meta','{}'::jsonb));
+
+  insert into public.persons
+    (id,gen,char_gen,name,alias,sex,birth,birth_lunar,birth_place,death,death_lunar,alive,
+     rank,relation_type,father_id,father_note,mother,spouse,occupation,residence,burial,
+     contact,address,deeds,source,status,note,photo,deleted,deleted_at,sort_order)
+  select
+     p->>'id', coalesce(p->>'gen',''), coalesce(p->>'char_gen',''), coalesce(p->>'name',''),
+     coalesce(p->>'alias',''), coalesce(p->>'sex',''), coalesce(p->>'birth',''),
+     coalesce(p->>'birth_lunar',''), coalesce(p->>'birth_place',''), coalesce(p->>'death',''),
+     coalesce(p->>'death_lunar',''), coalesce(p->>'alive',''), coalesce(p->>'rank',''),
+     coalesce(p->>'relation_type',''), coalesce(p->>'father_id',''), coalesce(p->>'father_note',''),
+     coalesce(p->>'mother',''), coalesce(p->>'spouse',''), coalesce(p->>'occupation',''),
+     coalesce(p->>'residence',''), coalesce(p->>'burial',''), coalesce(p->>'contact',''),
+     coalesce(p->>'address',''), coalesce(p->>'deeds',''), coalesce(p->>'source',''),
+     coalesce(p->>'status',''), coalesce(p->>'note',''), coalesce(p->>'photo',''),
+     coalesce((p->>'deleted')::int,0), coalesce(p->>'deleted_at',''), coalesce((p->>'sort_order')::int,0)
+  from jsonb_array_elements(payload->'persons') p;
+
+  for p in select value from jsonb_array_elements(payload->'persons') loop
+    pid := p->>'id';
+    insert into public.marriages(person_id,spouse,spouse_family,marriage_year,relation,note,sort_order)
+    select pid, coalesce(m->>'spouse',''), coalesce(m->>'spouse_family',''), coalesce(m->>'marriage_year',''),
+           coalesce(m->>'relation',''), coalesce(m->>'note',''), coalesce((m->>'sort_order')::int,0)
+    from jsonb_array_elements(coalesce(p->'marriages','[]'::jsonb)) m;
+    insert into public.media(person_id,path,caption,is_primary,sort_order)
+    select pid, coalesce(md->>'path',''), coalesce(md->>'caption',''),
+           coalesce((md->>'is_primary')::int,0), coalesce((md->>'sort_order')::int,0)
+    from jsonb_array_elements(coalesce(p->'media','[]'::jsonb)) md;
+  end loop;
+
+  insert into public.narratives(key,title,text,sort_order)
+  select n->>'key', coalesce(n->>'title',''), coalesce(n->>'text',''), coalesce((n->>'sort_order')::int,0)
+  from jsonb_array_elements(coalesce(payload->'narratives','[]'::jsonb)) n;
+
+  insert into public.verify(category,topic,detail,status,resolution,date,sort_order)
+  select coalesce(v->>'category',''), coalesce(v->>'topic',''), coalesce(v->>'detail',''),
+         coalesce(v->>'status',''), coalesce(v->>'resolution',''), coalesce(v->>'date',''),
+         coalesce((v->>'sort_order')::int,0)
+  from jsonb_array_elements(coalesce(payload->'verify','[]'::jsonb)) v;
+
+  insert into public.transcription(page,label,text,sort_order)
+  select t->>'page', coalesce(t->>'label',''), coalesce(t->>'text',''), coalesce((t->>'sort_order')::int,0)
+  from jsonb_array_elements(coalesce(payload->'transcription','[]'::jsonb)) t;
+
+  insert into public.history(ts,action,entity,entity_id,summary)
+  values (to_char(now(),'YYYY-MM-DD HH24:MI:SS'),'import','db','-',
+          '导入JSON恢复,人物 ' || jsonb_array_length(payload->'persons'));
+
+  return jsonb_build_object('ok', true, 'persons', jsonb_array_length(payload->'persons'));
+end $$;
+
+revoke all on function public.import_full(jsonb) from anon, public;
+grant execute on function public.import_full(jsonb) to authenticated;
