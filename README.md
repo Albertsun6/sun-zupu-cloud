@@ -21,7 +21,7 @@ scripts/   migrate.mjs                          ← 一次性数据迁移(本地
 2. SQL Editor 依次整段运行:`supabase/schema.sql` → `policies.sql` → `functions.sql`。
 3. Authentication → Providers → **Email 开启**;Authentication → Settings → **关闭 "Allow new users to sign up"**(只邀请、不自助注册)。
 4. Authentication → Users → **Add user**:给每位家人建邮箱+密码(勾 auto-confirm)。给每人设角色:编辑 user → **app_metadata** 填 `{"role":"editor"}`(可编辑)或 `{"role":"viewer"}`(只读)。
-5. Storage → 确认有名为 `photos` 的**公开**桶(policies.sql 已自动建)。
+5. Storage → 确认有名为 `photos` 的**公开**桶(policies.sql 已自动建);原谱影像放在桶内 **`yuanpu`** 文件夹(Supabase 文件夹用拼音,前端已对齐 `yuanpu/p1..p4.jpg`)。
 6. Settings → API 抄下 **Project URL** 和 **anon public key**。
 
 ### 2. 填配置 + 发到 GitHub

@@ -18,7 +18,7 @@ const FORM_KEYS = ["id","name","gen","char_gen","rank","relation_type","alias","
   "birth_lunar","death","death_lunar","birth_place","burial","alive","mother","father_note",
   "spouse","occupation","residence","contact","address","deeds","source","status","note"];
 const DIRECT_LINE = new Set(["S001","S002","S004","S008","S010","S014","S019","S033","S046"]);
-const ORIG_IMG = {p1:window.photoUrl("原谱/p1.jpg"),p2:window.photoUrl("原谱/p2.jpg"),p3:window.photoUrl("原谱/p3.jpg"),p4:window.photoUrl("原谱/p4.jpg")};
+const ORIG_IMG = {p1:window.photoUrl("yuanpu/p1.jpg"),p2:window.photoUrl("yuanpu/p2.jpg"),p3:window.photoUrl("yuanpu/p3.jpg"),p4:window.photoUrl("yuanpu/p4.jpg")};
 const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media"]);
 
 const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[], q:"", share:false,

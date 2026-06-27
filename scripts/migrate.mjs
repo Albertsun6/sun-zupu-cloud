@@ -55,7 +55,7 @@ async function main() {
     const fp = path.join(imgDir, pg + ".jpg");
     if (!fs.existsSync(fp)) { console.log("  原谱图缺失,跳过:", fp); continue; }
     const buf = fs.readFileSync(fp);
-    const u = await fetch(`${URL_}/storage/v1/object/photos/${encodeURIComponent("原谱")}/${pg}.jpg`, {
+    const u = await fetch(`${URL_}/storage/v1/object/photos/yuanpu/${pg}.jpg`, {
       method: "POST",
       headers: { apikey: KEY, Authorization: "Bearer " + KEY, "Content-Type": "image/jpeg", "x-upsert": "true" },
       body: buf,
