@@ -87,7 +87,8 @@ function renderOverview(){
   if(!keys.length){ box.appendChild(el("p","note","无匹配人物。")); return; }
   keys.forEach(k=>{
     const blk=el("div","gen-block"); const cg=groups[k][0]?.char_gen;
-    blk.appendChild(el("div","gen-head",`第 ${esc(k)} 代`+(cg&&cg!=="—"?` <span class="tag">${esc(cg)}字辈</span>`:"")));
+    const head = k==="—" ? "未入世系 · 外部人物" : `第 ${esc(k)} 代`;
+    blk.appendChild(el("div","gen-head",head+(cg&&cg!=="—"?` <span class="tag">${esc(cg)}字辈</span>`:"")));
     const cards=el("div","cards");
     groups[k].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).forEach(p=>cards.appendChild(personCard(p)));
     blk.appendChild(cards); box.appendChild(blk);
