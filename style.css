@@ -191,3 +191,16 @@ body.viewer .edit-only{display:none !important}
 .graphlegend .leg{display:flex;align-items:center;gap:.3rem;font-size:.75rem;color:#475569}
 .graphlegend .leg i{width:14px;height:3px;border-radius:2px;display:inline-block}
 #graphBox{border:1px solid var(--line);border-radius:10px;background:#fff}
+
+/* 名册(可配置列表格) */
+.rosterbar{display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-bottom:.6rem}
+.rosterbar select{padding:.3rem;border:1px solid var(--line);border-radius:6px;font-size:.82rem}
+.colpick summary{cursor:pointer;font-size:.82rem;color:#047857;font-weight:600}
+.colpick .colgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:.3rem .8rem;margin:.5rem 0;padding:.6rem;border:1px solid var(--line);border-radius:8px;background:#f8fafc}
+.colpick label{font-size:.8rem;display:flex;gap:.3rem;align-items:center;font-weight:400;color:#334155}
+.rostertable{overflow:auto;border:1px solid var(--line);border-radius:8px;max-height:78vh}
+table.roster{border-collapse:collapse;width:100%;font-size:.85rem;white-space:nowrap}
+table.roster th,table.roster td{border-bottom:1px solid #eef2f7;padding:.42rem .65rem;text-align:left}
+table.roster th{position:sticky;top:0;background:#f1f5f9;cursor:pointer;user-select:none;font-weight:600;color:#334155}
+table.roster tbody tr{cursor:pointer}
+table.roster tbody tr:hover{background:#ecfdf5}

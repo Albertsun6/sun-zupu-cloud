@@ -20,6 +20,7 @@ create table if not exists public.persons (
   alive         text default '',
   rank          text default '',
   relation_type text default '',
+  kind          text default '本族',   -- 本族 / 外部(非家族成员)
   father_id     text default '',     -- 故意不设外键(purge 会置空、体检要查悬空父)
   father_note   text default '',
   mother        text default '',

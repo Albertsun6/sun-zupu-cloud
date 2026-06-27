@@ -14,7 +14,7 @@ const $ = s => document.querySelector(s);
 const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 
-const FORM_KEYS = ["id","name","gen","char_gen","rank","relation_type","alias","sex","birth",
+const FORM_KEYS = ["id","name","gen","char_gen","rank","relation_type","kind","alias","sex","birth",
   "birth_lunar","birth_time","death","death_lunar","birth_place","burial","alive","mother","father_note",
   "spouse","occupation","residence","contact","address","deeds","source","status","note"];
 const DIRECT_LINE = new Set(["S001","S002","S004","S008","S010","S014","S019","S033","S046"]);
@@ -23,7 +23,7 @@ const UNDOABLE = new Set(["create:person","update:person","delete:person","purge
 
 const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[], q:"", share:false,
                 editing:null, user:null, canEdit:false,
-                filters:{charGen:"",status:"",alive:""} };
+                filters:{charGen:"",status:"",alive:"",kind:""} };
 
 // api(method,path,body) 由 db.js 提供(Supabase shim);此处不再定义。
 async function reloadPersons(){ state.persons = await api("GET","/api/persons"); }
@@ -56,12 +56,13 @@ function matchQ(p){
   return [p.id,p.name,p.alias,p.note,p.deeds,p.residence,p.char_gen,p.occupation,p.birth_place,p.birth,p.death]
     .join(" ").toLowerCase().includes(state.q.toLowerCase());
 }
-function anyFilter(){ return !!(state.filters.charGen||state.filters.status||state.filters.alive); }
+function anyFilter(){ return !!(state.filters.charGen||state.filters.status||state.filters.alive||state.filters.kind); }
 function matchFilter(p){
   const f=state.filters;
   if(f.charGen && p.char_gen!==f.charGen) return false;
   if(f.status && p.status!==f.status) return false;
   if(f.alive && p.alive!==f.alive) return false;
+  if(f.kind && (p.kind||"本族")!==f.kind) return false;
   return true;
 }
 function renderFilters(){
@@ -73,8 +74,9 @@ function renderFilters(){
   fb.appendChild(mk("全部字辈","charGen",cg));
   fb.appendChild(mk("全部状态","status",["确认","存疑","待考","待补"]));
   fb.appendChild(mk("在世/已故","alive",["是","否"]));
+  fb.appendChild(mk("本族/外部","kind",["本族","外部"]));
   const fcEl=el("span","fcount"); fcEl.id="fcount"; fb.appendChild(fcEl);
-  if(state.q||anyFilter()){ const clr=el("button","btn btn-sm","清除"); clr.onclick=()=>{ state.q=""; $("#search").value=""; state.filters={charGen:"",status:"",alive:""}; renderFilters(); renderOverview(); }; fb.appendChild(clr); }
+  if(state.q||anyFilter()){ const clr=el("button","btn btn-sm","清除"); clr.onclick=()=>{ state.q=""; $("#search").value=""; state.filters={charGen:"",status:"",alive:"",kind:""}; renderFilters(); renderOverview(); }; fb.appendChild(clr); }
 }
 function renderOverview(){
   const box=$("#overview"); box.innerHTML="";
@@ -82,7 +84,7 @@ function renderOverview(){
   const list=state.persons.filter(p=>matchQ(p)&&matchFilter(p));
   const fc=$("#fcount"); if(fc) fc.textContent=(state.q||anyFilter())?`找到 ${list.length} 人`:`共 ${state.persons.length} 人`;
   const groups={};
-  list.forEach(p=>{ (groups[p.gen||"—"]=groups[p.gen||"—"]||[]).push(p); });
+  list.forEach(p=>{ const gkey=(p.kind==="外部")?"—":(p.gen||"—"); (groups[gkey]=groups[gkey]||[]).push(p); });
   const keys=Object.keys(groups).sort((a,b)=>gk(a)-gk(b));
   if(!keys.length){ box.appendChild(el("p","note","无匹配人物。")); return; }
   keys.forEach(k=>{
@@ -596,6 +598,46 @@ async function renderGraph(){
 }
 window.addEventListener("resize", ()=>{ const v=document.getElementById("view-graph"); if(_graphChart&&v&&v.classList.contains("active")) _graphChart.resize(); });
 
+/* ---------- 名册:全部人员表格 · 列可配置 · 可排序 · 点行编辑 ---------- */
+const ROSTER_COLS = [
+  {k:"name",label:"姓名"},{k:"kind",label:"本族/外部"},{k:"gen",label:"世代"},{k:"char_gen",label:"字辈"},
+  {k:"sex",label:"性别"},{k:"alive",label:"在世"},{k:"rank",label:"行第"},{k:"relation_type",label:"亲属关系"},
+  {k:"birth",label:"生年"},{k:"birth_lunar",label:"农历生"},{k:"birth_time",label:"出生时间"},{k:"death",label:"卒年"},
+  {k:"birth_place",label:"出生地"},{k:"occupation",label:"学历/职业"},{k:"residence",label:"居地"},{k:"burial",label:"葬地"},
+  {k:"mother",label:"母"},{k:"spouse",label:"配偶"},{k:"contact",label:"联系方式"},{k:"address",label:"住址"},
+  {k:"status",label:"状态"},{k:"note",label:"备注"},{k:"id",label:"ID"}
+];
+const ROSTER_DEFAULT = ["name","kind","gen","char_gen","sex","alive","birth","death","occupation"];
+function rosterCols(){ try{ const s=JSON.parse(localStorage.getItem("roster_cols")||"null"); if(Array.isArray(s)&&s.length) return s; }catch(e){} return ROSTER_DEFAULT.slice(); }
+let _rosterSort={k:"gen",dir:1}, _colpickOpen=false;
+function renderRoster(){
+  const box=$("#rosterBox"); if(!box) return;
+  const colset=new Set(rosterCols());
+  const orderedCols=ROSTER_COLS.filter(c=>colset.has(c.k));
+  let list=state.persons.filter(p=>!p.deleted && matchQ(p));
+  const kind=$("#rosterKind") ? $("#rosterKind").value : "";
+  if(kind) list=list.filter(p=>(p.kind||"本族")===kind);
+  const sk=_rosterSort.k, dir=_rosterSort.dir;
+  list=list.slice().sort((a,b)=>{ let va,vb; if(sk==="gen"){va=gk(a.gen);vb=gk(b.gen);} else {va=(a[sk]??"")+"";vb=(b[sk]??"")+"";}
+    return va<vb?-dir:va>vb?dir:0; });
+  const picker=`<details class="colpick"${_colpickOpen?" open":""}><summary>列设置(${colset.size} 列)</summary><div class="colgrid">`
+    + ROSTER_COLS.map(c=>`<label><input type="checkbox" data-col="${c.k}"${colset.has(c.k)?" checked":""}> ${esc(c.label)}</label>`).join("") + `</div></details>`;
+  const bar=`<div class="rosterbar">${picker}`
+    + `<select id="rosterKind"><option value="">全部</option><option value="本族"${kind==="本族"?" selected":""}>本族</option><option value="外部"${kind==="外部"?" selected":""}>外部</option></select>`
+    + `<span class="hint">${list.length} 人 · 点一行${state.canEdit?"编辑":"看详情"}</span></div>`;
+  const thead="<tr>"+orderedCols.map(c=>`<th data-sk="${c.k}">${esc(c.label)}${sk===c.k?(dir>0?" ▲":" ▼"):""}</th>`).join("")+"</tr>";
+  const fmt=(p,k)=> k==="kind"?(p.kind||"本族"):(p[k]==null?"":p[k]);
+  const rows=list.map(p=>`<tr data-pid="${esc(p.id)}">`+orderedCols.map(c=>`<td>${esc(String(fmt(p,c.k)))}</td>`).join("")+`</tr>`).join("");
+  box.innerHTML=bar+`<div class="rostertable"><table class="roster"><thead>${thead}</thead><tbody>${rows||""}</tbody></table></div>`;
+  const dt=box.querySelector(".colpick"); if(dt) dt.ontoggle=e=>{ _colpickOpen=e.target.open; };
+  box.querySelectorAll(".colpick input[type=checkbox]").forEach(cb=>cb.onchange=()=>{
+    const cur=new Set(rosterCols()); cb.checked?cur.add(cb.dataset.col):cur.delete(cb.dataset.col);
+    localStorage.setItem("roster_cols", JSON.stringify(ROSTER_COLS.filter(c=>cur.has(c.k)).map(c=>c.k))); renderRoster(); });
+  const rk=$("#rosterKind"); if(rk) rk.onchange=renderRoster;
+  box.querySelectorAll("th[data-sk]").forEach(th=>th.onclick=()=>{ const k=th.dataset.sk; _rosterSort=(sk===k)?{k,dir:-dir}:{k,dir:1}; renderRoster(); });
+  box.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{ const p=byId(tr.dataset.pid); if(p){ state.canEdit?openEdit(p):openDetail(p); } });
+}
+
 /* ---------- 标签切换 ---------- */
 function switchView(name){
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.view===name));
@@ -605,12 +647,13 @@ function switchView(name){
   if(name==="tree") renderTree();
   if(name==="relations") renderRelations();
   if(name==="graph") renderGraph();
+  if(name==="roster") renderRoster();
   if(name==="trash") renderTrash();
   if(name==="health") renderHealth();
   if(name==="log"){ renderBackup(); renderLog(); }
 }
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchView(t.dataset.view));
-$("#search").oninput=e=>{ state.q=e.target.value; renderFilters(); renderOverview(); };
+$("#search").oninput=e=>{ state.q=e.target.value; renderFilters(); renderOverview(); if(document.getElementById("view-roster").classList.contains("active")) renderRoster(); };
 $("#shareMode").onchange=e=>{ state.share=e.target.checked; renderOverview(); };
 $("#addBtn").onclick=()=>openEdit(null);
 $("#saveBtn").onclick=saveModal;
