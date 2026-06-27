@@ -13,6 +13,10 @@ async function getMermaid(){
 const $ = s => document.querySelector(s);
 const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+// 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
+const APP_VERSION = "v0.6.0";
+const APP_DATE = "2026-06-27";
+[["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
 const FORM_KEYS = ["id","name","gen","char_gen","rank","relation_type","kind","alias","sex","birth",
   "birth_lunar","birth_time","death","death_lunar","birth_place","burial","alive","mother","father_note",

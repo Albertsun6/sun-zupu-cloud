@@ -204,3 +204,4 @@ table.roster th,table.roster td{border-bottom:1px solid #eef2f7;padding:.42rem .
 table.roster th{position:sticky;top:0;background:#f1f5f9;cursor:pointer;user-select:none;font-weight:600;color:#334155}
 table.roster tbody tr{cursor:pointer}
 table.roster tbody tr:hover{background:#ecfdf5}
+.ver{font-size:.7rem;color:#94a3b8;font-weight:400}

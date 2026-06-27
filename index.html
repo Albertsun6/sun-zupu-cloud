@@ -11,7 +11,7 @@
 
 <header>
   <div class="bar">
-    <div class="title" id="title">孙氏族谱 <small id="subtitle"></small></div>
+    <div class="title" id="title">孙氏族谱 <small id="subtitle"></small> <small class="ver" id="appVer"></small></div>
     <div class="stats" id="stats"></div>
     <div class="spacer"></div>
     <input class="search" id="search" type="text" placeholder="搜索姓名/字号/备注…"/>
@@ -101,6 +101,7 @@
     <div class="err" id="loginErr"></div>
     <div class="modal-foot"><span class="spacer"></span><button class="btn btn-primary" id="loginBtn">登录</button></div>
     <div class="hint" style="margin-top:.7rem">账号由管理员在 Supabase 后台创建/邀请;忘记密码请联系管理员。未登录看不到任何家谱数据。</div>
+    <div class="hint" id="appVerLogin" style="margin-top:.5rem;text-align:right;color:#cbd5e1"></div>
   </div>
 </div>
 
@@ -123,7 +124,7 @@
   <div class="modal">
     <h2 id="modalTitle">编辑人物</h2>
     <div class="grid2">
-      <div class="field"><label>ID</label><input type="text" id="f_id" placeholder="留空自动生成"/></div>
+      <div class="field"><label>ID(自动生成)</label><input type="text" id="f_id" readonly placeholder="保存后自动生成" style="background:#f1f5f9;color:#94a3b8"/></div>
       <div class="field"><label>姓名</label><input type="text" id="f_name"/></div>
       <div class="field"><label>类型(本族/外部)</label><select id="f_kind"><option>本族</option><option>外部</option></select></div>
       <div class="field"><label>世代</label><input type="text" id="f_gen" placeholder="如 5;往上补先祖可用 0、-1"/></div>
