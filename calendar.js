@@ -145,3 +145,77 @@ function normBirthTime() {
 }
 document.addEventListener("input", e => { if (e.target.id === "f_birth_time") liveShichen(); });
 document.addEventListener("change", e => { if (e.target.id === "f_birth_time") normBirthTime(); }, true);
+
+// ---- 🕐 出生时间选择器:按钟点(时+分,自动算时辰)或 只按时辰,填入 #f_birth_time ----
+const SHICHEN_RANGE = ["23-1", "1-3", "3-5", "5-7", "7-9", "9-11", "11-13", "13-15", "15-17", "17-19", "19-21", "21-23"];
+const tmask = document.createElement("div");
+tmask.className = "mask"; tmask.id = "timeMask";
+tmask.innerHTML = `
+  <div class="modal" style="width:min(360px,100%)">
+    <h2>选择出生时间</h2>
+    <div class="field"><label>怎么选(自动算时辰)</label>
+      <div style="display:flex;gap:1.2rem;align-items:center">
+        <label class="switch"><input type="radio" name="tmMode" value="clock" checked> 按钟点</label>
+        <label class="switch"><input type="radio" name="tmMode" value="shichen"> 只按时辰</label>
+      </div></div>
+    <div class="grid2" id="tmClock" style="grid-template-columns:1fr 1fr">
+      <div class="field"><label>时(0–23)</label><select id="tmH"></select></div>
+      <div class="field"><label>分</label><select id="tmMin"></select></div>
+    </div>
+    <div class="field" id="tmShi" style="display:none"><label>时辰</label><select id="tmSc"></select></div>
+    <div class="hint" id="tmPrev" style="margin-top:.6rem;font-size:.85rem"></div>
+    <div class="modal-foot"><span class="spacer"></span>
+      <button class="btn" id="tmCancel" type="button">取消</button>
+      <button class="btn btn-primary" id="tmOk" type="button">填入</button></div>
+  </div>`;
+document.body.appendChild(tmask);
+const tq = id => tmask.querySelector("#" + id);
+const tmH = tq("tmH"), tmMin = tq("tmMin"), tmSc = tq("tmSc"), tmClock = tq("tmClock"), tmShi = tq("tmShi"), tmPrev = tq("tmPrev");
+for (let h = 0; h <= 23; h++) tmH.add(new Option(h + " 点(" + shichenOf(h) + ")", h));
+for (let mi = 0; mi <= 59; mi++) tmMin.add(new Option(String(mi).padStart(2, "0") + " 分", mi));
+SHICHEN.forEach((s, i) => tmSc.add(new Option(s + "时(" + SHICHEN_RANGE[i] + "点)", s + "时")));
+const tmMode = () => tmask.querySelector("input[name=tmMode]:checked").value;
+function tmRefresh() {
+  const clock = tmMode() === "clock";
+  tmClock.style.display = clock ? "" : "none";
+  tmShi.style.display = clock ? "none" : "";
+  tmPrev.innerHTML = clock
+    ? `出生时间 <b>${+tmH.value}:${String(+tmMin.value).padStart(2, "0")}</b> &nbsp;·&nbsp; 时辰 <b>${shichenOf(+tmH.value)}</b>`
+    : `时辰 <b>${tmSc.value}</b>`;
+}
+function tmOpen() {
+  if (!document.getElementById("f_birth_time")) return;
+  const cur = (document.getElementById("f_birth_time").value || "").trim();
+  const m = cur.match(/^(\d{1,2})(?:[:：点时]?(\d{1,2}))?/);
+  const sc = cur.match(/([子丑寅卯辰巳午未申酉戌亥])时/);
+  if (m && +m[1] >= 0 && +m[1] <= 23) {
+    tmask.querySelector("input[name=tmMode][value=clock]").checked = true;
+    tmH.value = +m[1]; tmMin.value = m[2] != null ? +m[2] : 0;
+  } else if (sc) {
+    tmask.querySelector("input[name=tmMode][value=shichen]").checked = true;
+    tmSc.value = sc[1] + "时";
+  } else {
+    tmask.querySelector("input[name=tmMode][value=clock]").checked = true;
+    tmH.value = 12; tmMin.value = 0;
+  }
+  tmRefresh();
+  tmask.classList.add("open");
+}
+function tmClose() { tmask.classList.remove("open"); }
+tmask.addEventListener("change", e => {
+  if (e.target.name === "tmMode" || ["tmH", "tmMin", "tmSc"].includes(e.target.id)) tmRefresh();
+});
+tq("tmCancel").addEventListener("click", tmClose);
+tmask.addEventListener("click", e => { if (e.target === tmask) tmClose(); });
+tq("tmOk").addEventListener("click", () => {
+  const el = document.getElementById("f_birth_time");
+  el.value = tmMode() === "clock"
+    ? `${+tmH.value}:${String(+tmMin.value).padStart(2, "0")} ${shichenOf(+tmH.value)}`
+    : tmSc.value;
+  const hint = document.getElementById("f_birth_time_sc"); if (hint) hint.textContent = "";
+  tmClose();
+});
+document.addEventListener("click", e => {
+  const b = e.target.closest(".time-btn");
+  if (b) { e.preventDefault(); tmOpen(); }
+});
