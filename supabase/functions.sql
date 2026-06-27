@@ -31,17 +31,17 @@ begin
      rank,relation_type,father_id,father_note,mother,spouse,occupation,residence,burial,
      contact,address,deeds,source,status,note,photo,deleted,deleted_at,sort_order)
   select
-     p->>'id', coalesce(p->>'gen',''), coalesce(p->>'char_gen',''), coalesce(p->>'name',''),
-     coalesce(p->>'alias',''), coalesce(p->>'sex',''), coalesce(p->>'birth',''),
-     coalesce(p->>'birth_lunar',''), coalesce(p->>'birth_place',''), coalesce(p->>'death',''),
-     coalesce(p->>'death_lunar',''), coalesce(p->>'alive',''), coalesce(p->>'rank',''),
-     coalesce(p->>'relation_type',''), coalesce(p->>'father_id',''), coalesce(p->>'father_note',''),
-     coalesce(p->>'mother',''), coalesce(p->>'spouse',''), coalesce(p->>'occupation',''),
-     coalesce(p->>'residence',''), coalesce(p->>'burial',''), coalesce(p->>'contact',''),
-     coalesce(p->>'address',''), coalesce(p->>'deeds',''), coalesce(p->>'source',''),
-     coalesce(p->>'status',''), coalesce(p->>'note',''), coalesce(p->>'photo',''),
-     coalesce((p->>'deleted')::int,0), coalesce(p->>'deleted_at',''), coalesce((p->>'sort_order')::int,0)
-  from jsonb_array_elements(payload->'persons') p;
+     pj->>'id', coalesce(pj->>'gen',''), coalesce(pj->>'char_gen',''), coalesce(pj->>'name',''),
+     coalesce(pj->>'alias',''), coalesce(pj->>'sex',''), coalesce(pj->>'birth',''),
+     coalesce(pj->>'birth_lunar',''), coalesce(pj->>'birth_place',''), coalesce(pj->>'death',''),
+     coalesce(pj->>'death_lunar',''), coalesce(pj->>'alive',''), coalesce(pj->>'rank',''),
+     coalesce(pj->>'relation_type',''), coalesce(pj->>'father_id',''), coalesce(pj->>'father_note',''),
+     coalesce(pj->>'mother',''), coalesce(pj->>'spouse',''), coalesce(pj->>'occupation',''),
+     coalesce(pj->>'residence',''), coalesce(pj->>'burial',''), coalesce(pj->>'contact',''),
+     coalesce(pj->>'address',''), coalesce(pj->>'deeds',''), coalesce(pj->>'source',''),
+     coalesce(pj->>'status',''), coalesce(pj->>'note',''), coalesce(pj->>'photo',''),
+     coalesce((pj->>'deleted')::int,0), coalesce(pj->>'deleted_at',''), coalesce((pj->>'sort_order')::int,0)
+  from jsonb_array_elements(payload->'persons') pj;
 
   for p in select value from jsonb_array_elements(payload->'persons') loop
     pid := p->>'id';
