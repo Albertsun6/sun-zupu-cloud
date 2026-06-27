@@ -117,9 +117,9 @@
       <div class="field"><label>字号/曾用名/小名</label><input type="text" id="f_alias"/></div>
       <div class="field"><label>性别</label>
         <select id="f_sex"><option value=""></option><option>男</option><option>女</option></select></div>
-      <div class="field"><label>生年(公历)</label><input type="text" id="f_birth"/></div>
+      <div class="field"><label>生年(公历) <button type="button" class="btn btn-sm cal-btn edit-only" data-ev="birth" title="用万年历选日期,自动填好公历+农历">📅 万年历</button></label><input type="text" id="f_birth"/></div>
       <div class="field"><label>生辰(农历)</label><input type="text" id="f_birth_lunar" placeholder="如 农历六月十六"/></div>
-      <div class="field"><label>卒年/享年(公历)</label><input type="text" id="f_death"/></div>
+      <div class="field"><label>卒年/享年(公历) <button type="button" class="btn btn-sm cal-btn edit-only" data-ev="death" title="用万年历选日期,自动填好公历+农历">📅 万年历</button></label><input type="text" id="f_death"/></div>
       <div class="field"><label>卒日(农历)</label><input type="text" id="f_death_lunar" placeholder="如 腊月初九"/></div>
       <div class="field"><label>出生地</label><input type="text" id="f_birth_place"/></div>
       <div class="field"><label>葬地/茔地</label><input type="text" id="f_burial"/></div>
@@ -166,5 +166,6 @@
 <script src="config.js"></script>
 <script type="module" src="db.js"></script>
 <script type="module" src="app.js"></script>
+<script type="module" src="calendar.js"></script>
 </body>
 </html>
