@@ -27,13 +27,13 @@ begin
   insert into public.meta(key, value) values ('meta', coalesce(payload->'meta','{}'::jsonb));
 
   insert into public.persons
-    (id,gen,char_gen,name,alias,sex,birth,birth_lunar,birth_place,death,death_lunar,alive,
+    (id,gen,char_gen,name,alias,sex,birth,birth_lunar,birth_time,birth_place,death,death_lunar,alive,
      rank,relation_type,father_id,father_note,mother,spouse,occupation,residence,burial,
      contact,address,deeds,source,status,note,photo,deleted,deleted_at,sort_order)
   select
      pj->>'id', coalesce(pj->>'gen',''), coalesce(pj->>'char_gen',''), coalesce(pj->>'name',''),
      coalesce(pj->>'alias',''), coalesce(pj->>'sex',''), coalesce(pj->>'birth',''),
-     coalesce(pj->>'birth_lunar',''), coalesce(pj->>'birth_place',''), coalesce(pj->>'death',''),
+     coalesce(pj->>'birth_lunar',''), coalesce(pj->>'birth_time',''), coalesce(pj->>'birth_place',''), coalesce(pj->>'death',''),
      coalesce(pj->>'death_lunar',''), coalesce(pj->>'alive',''), coalesce(pj->>'rank',''),
      coalesce(pj->>'relation_type',''), coalesce(pj->>'father_id',''), coalesce(pj->>'father_note',''),
      coalesce(pj->>'mother',''), coalesce(pj->>'spouse',''), coalesce(pj->>'occupation',''),

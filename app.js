@@ -15,7 +15,7 @@ const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; i
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 
 const FORM_KEYS = ["id","name","gen","char_gen","rank","relation_type","alias","sex","birth",
-  "birth_lunar","death","death_lunar","birth_place","burial","alive","mother","father_note",
+  "birth_lunar","birth_time","death","death_lunar","birth_place","burial","alive","mother","father_note",
   "spouse","occupation","residence","contact","address","deeds","source","status","note"];
 const DIRECT_LINE = new Set(["S001","S002","S004","S008","S010","S014","S019","S033","S046"]);
 const ORIG_IMG = {p1:window.photoUrl("yuanpu/p1.jpg"),p2:window.photoUrl("yuanpu/p2.jpg"),p3:window.photoUrl("yuanpu/p3.jpg"),p4:window.photoUrl("yuanpu/p4.jpg")};
@@ -380,7 +380,7 @@ async function openDetail(p){
 
   const rows=[];
   const R=(k,v)=>{ if(v) rows.push(`<div class="drow"><span class="dk">${k}</span><span class="dv">${esc(v)}</span></div>`); };
-  R("生", [p.birth, p.birth_lunar&&("农历 "+p.birth_lunar)].filter(Boolean).join(" · "));
+  R("生", [p.birth, p.birth_lunar&&("农历 "+p.birth_lunar), p.birth_time].filter(Boolean).join(" · "));
   R("卒", [p.death, p.death_lunar&&("农历 "+p.death_lunar)].filter(Boolean).join(" · "));
   R("出生地", p.birth_place); R("葬地", p.burial); R("行第", p.rank); R("亲属关系", p.relation_type);
   R("字号", p.alias); R("性别", p.sex); R("学历/职业", p.occupation); R("居地/迁徙", p.residence);

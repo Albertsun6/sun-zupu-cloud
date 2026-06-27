@@ -13,6 +13,7 @@ create table if not exists public.persons (
   sex           text default '',
   birth         text default '',
   birth_lunar   text default '',
+  birth_time    text default '',     -- 出生时间(时:分),时辰自动附在后
   birth_place   text default '',
   death         text default '',
   death_lunar   text default '',

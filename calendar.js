@@ -121,3 +121,27 @@ document.addEventListener("click", e => {
   const b = e.target.closest(".cal-btn");
   if (b) { e.preventDefault(); open(b.dataset.ev); }
 });
+
+// ---- 出生时间 → 时辰自动生成 ----
+// 在 #f_birth_time 里填时:分(如 14:30 / 9点 / 1430),失焦后规范成 "14:30 未时";
+// 直接写"未时"等非时间文字则原样保留。十二时辰:子23-1 丑1-3 寅3-5 …(每两小时一时辰)。
+const SHICHEN = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"];
+const shichenOf = h => SHICHEN[Math.floor(((h + 1) % 24) / 2)] + "时";
+const matchClock = v => (v.trim().match(/^(\d{1,2})(?:[:：点时]?(\d{1,2}))?/));
+function liveShichen() {
+  const el = document.getElementById("f_birth_time"), hint = document.getElementById("f_birth_time_sc");
+  if (!el || !hint) return;
+  const m = matchClock(el.value);
+  hint.textContent = (m && +m[1] >= 0 && +m[1] <= 23) ? "→ " + shichenOf(+m[1]) : "";
+}
+function normBirthTime() {
+  const el = document.getElementById("f_birth_time"); if (!el) return;
+  const m = matchClock(el.value);
+  if (m && +m[1] >= 0 && +m[1] <= 23) {
+    const h = +m[1], mm = m[2] != null ? String(m[2]).padStart(2, "0") : "00";
+    el.value = `${h}:${mm} ${shichenOf(h)}`;
+  }
+  const hint = document.getElementById("f_birth_time_sc"); if (hint) hint.textContent = "";
+}
+document.addEventListener("input", e => { if (e.target.id === "f_birth_time") liveShichen(); });
+document.addEventListener("change", e => { if (e.target.id === "f_birth_time") normBirthTime(); }, true);
