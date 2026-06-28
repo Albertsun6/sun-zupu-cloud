@@ -206,11 +206,6 @@ table.roster tbody tr{cursor:pointer}
 table.roster tbody tr:hover{background:#ecfdf5}
 .ver{font-size:.7rem;color:#94a3b8;font-weight:400}
 #mask.ext .fam-only{display:none!important}   /* 外部人物隐藏族谱专属字段 */
-.addmenu{position:relative;display:inline-block}
-.addmenu>summary{list-style:none;cursor:pointer}
-.addmenu>summary::-webkit-details-marker{display:none}
-.addmenu-pop{position:absolute;z-index:60;top:115%;left:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.16);padding:.4rem;display:flex;flex-direction:column;gap:.3rem;min-width:150px}
-.addmenu-pop .btn{text-align:left}
 /* AI 批量添加 */
 #aiText{width:100%;padding:.6rem;border:1px solid var(--line);border-radius:8px;font-size:.9rem;font-family:inherit;box-sizing:border-box}
 #aiDrafts{max-height:48vh;overflow:auto;margin-top:.4rem}
@@ -226,3 +221,5 @@ table.roster tbody tr:hover{background:#ecfdf5}
 /* 合并对话框 */
 .mergerow{display:flex;gap:.4rem;align-items:center;padding:.5rem .3rem;border-bottom:1px dashed #eef2f7;cursor:pointer;font-size:.9rem}
 .mergerow input{margin-right:.2rem}
+.initrel{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;font-size:.85rem;color:#334155}
+.initrel select{padding:.3rem;border:1px solid var(--line);border-radius:6px;font-size:.85rem}
