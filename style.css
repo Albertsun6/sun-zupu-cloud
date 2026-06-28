@@ -205,3 +205,9 @@ table.roster th{position:sticky;top:0;background:#f1f5f9;cursor:pointer;user-sel
 table.roster tbody tr{cursor:pointer}
 table.roster tbody tr:hover{background:#ecfdf5}
 .ver{font-size:.7rem;color:#94a3b8;font-weight:400}
+#mask.ext .fam-only{display:none!important}   /* 外部人物隐藏族谱专属字段 */
+.addmenu{position:relative;display:inline-block}
+.addmenu>summary{list-style:none;cursor:pointer}
+.addmenu>summary::-webkit-details-marker{display:none}
+.addmenu-pop{position:absolute;z-index:60;top:115%;left:0;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.16);padding:.4rem;display:flex;flex-direction:column;gap:.3rem;min-width:150px}
+.addmenu-pop .btn{text-align:left}

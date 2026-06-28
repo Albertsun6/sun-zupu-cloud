@@ -14,8 +14,8 @@ const $ = s => document.querySelector(s);
 const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
-const APP_VERSION = "v0.6.0";
-const APP_DATE = "2026-06-27";
+const APP_VERSION = "v0.6.1";
+const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
 const FORM_KEYS = ["id","name","gen","char_gen","rank","relation_type","kind","alias","sex","birth",
@@ -470,15 +470,30 @@ function fillFatherSelect(currentId, selected){
 function openEdit(p, prefill){
   state.editing=p?p.id:null;
   const fa=prefill&&prefill.father_id&&byId(prefill.father_id);
-  $("#modalTitle").textContent=p?("详情 / 编辑:"+(p.name||p.id)):(fa?("添加子女(父:"+(fa.name||"")+")"):"添加人物(保存后可加照片/婚姻)");
+  $("#modalTitle").textContent=p?("详情 / 编辑:"+(p.name||p.id)):(fa?("添加子女(父:"+(fa.name||"")+")"):((prefill&&prefill.kind==="外部")?"添加外部人物":"添加本族人物(保存后可加照片/婚姻)"));
   $("#delBtn").style.display=p?"inline-block":"none";
   $("#modalErr").textContent="";
   const v=p||prefill||{status:"待考"};
   FORM_KEYS.forEach(k=>{ const f=$("#f_"+k); if(f) f.value=v[k]!=null?v[k]:""; });
   fillFatherSelect(p?p.id:null, v.father_id||"");
   renderMarriages(p?p.id:null); renderMedia(p?p.id:null);
-  $("#charGenHint").textContent=""; charGenAuto();
+  $("#charGenHint").textContent=""; charGenAuto(); applyKindUI();
   $("#mask").classList.add("open");
+}
+// 本族/外部 切换:外部隐藏族谱专属字段;已填内容默认保留(非破坏),并提供「清空」入口
+const FAM_FIELDS=["gen","char_gen","rank","relation_type","father_id","father_note"];
+function applyKindUI(){
+  const ext = $("#f_kind") && $("#f_kind").value==="外部";
+  $("#mask").classList.toggle("ext", !!ext);
+  const wrap=$("#kindNoteWrap"); if(!wrap) return;
+  if(ext){
+    const has = FAM_FIELDS.some(k=>{ const e=$("#f_"+k); return e && (e.value||"").trim(); });
+    if(has){
+      $("#kindNote").innerHTML='已隐藏族谱专属字段(世代/字辈/行第/亲属关系/父亲),已填内容<b>仍保留</b>。确为外部人士可 <button type="button" class="btn btn-sm" id="kindClear">清空这些字段</button>';
+      wrap.style.display="";
+      $("#kindClear").onclick=()=>{ if(!confirm("清空 世代/字辈/行第/亲属关系/父亲/父系说明?(保存后生效)"))return; FAM_FIELDS.forEach(k=>{ const e=$("#f_"+k); if(e) e.value=""; }); applyKindUI(); };
+    } else wrap.style.display="none";
+  } else wrap.style.display="none";
 }
 function closeModal(){ $("#mask").classList.remove("open"); state.editing=null; }
 function collectForm(){ const d={}; FORM_KEYS.forEach(k=>{ const f=$("#f_"+k); if(f) d[k]=f.value.trim(); }); d.father_id=$("#f_father_id").value; return d; }
@@ -659,12 +674,17 @@ function switchView(name){
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchView(t.dataset.view));
 $("#search").oninput=e=>{ state.q=e.target.value; renderFilters(); renderOverview(); if(document.getElementById("view-roster").classList.contains("active")) renderRoster(); };
 $("#shareMode").onchange=e=>{ state.share=e.target.checked; renderOverview(); };
-$("#addBtn").onclick=()=>openEdit(null);
+document.querySelectorAll("#addMenu [data-addkind]").forEach(b=>b.onclick=()=>{
+  $("#addMenu").removeAttribute("open");
+  openEdit(null, { kind:b.dataset.addkind, status:"待考" });
+});
+document.addEventListener("click",e=>{ const m=$("#addMenu"); if(m&&m.open&&!m.contains(e.target)) m.removeAttribute("open"); });
 $("#saveBtn").onclick=saveModal;
 $("#delBtn").onclick=delModal;
 $("#cancelBtn").onclick=closeModal;
 $("#reTree").onclick=renderTree;
 $("#f_father_id").onchange=charGenAuto;
+$("#f_kind").onchange=applyKindUI;
 $("#logoutBtn").onclick=async()=>{ try{ await window.SBAUTH.signOut(); }catch(e){} location.reload(); };
 $("#mask").onclick=e=>{ if(e.target===$("#mask")) closeModal(); };
 $("#dCloseBtn").onclick=closeDetail;

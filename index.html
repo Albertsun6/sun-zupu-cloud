@@ -16,7 +16,13 @@
     <div class="spacer"></div>
     <input class="search" id="search" type="text" placeholder="搜索姓名/字号/备注…"/>
     <div class="toolbar">
-      <button class="btn btn-primary btn-sm edit-only" id="addBtn">+ 添加人物</button>
+      <details class="addmenu edit-only" id="addMenu">
+        <summary class="btn btn-primary btn-sm">+ 添加人物 ▾</summary>
+        <div class="addmenu-pop">
+          <button type="button" class="btn btn-sm" data-addkind="本族">＋ 本族成员</button>
+          <button type="button" class="btn btn-sm" data-addkind="外部">＋ 外部人物</button>
+        </div>
+      </details>
       <button class="btn btn-sm" id="exShareHtml">导出分享版HTML</button>
       <button class="btn btn-sm" id="exCsv">CSV</button>
       <button class="btn btn-sm" id="exGedcom">GEDCOM</button>
@@ -127,10 +133,11 @@
       <div class="field"><label>ID(自动生成)</label><input type="text" id="f_id" readonly placeholder="保存后自动生成" style="background:#f1f5f9;color:#94a3b8"/></div>
       <div class="field"><label>姓名</label><input type="text" id="f_name"/></div>
       <div class="field"><label>类型(本族/外部)</label><select id="f_kind"><option>本族</option><option>外部</option></select></div>
-      <div class="field"><label>世代</label><input type="text" id="f_gen" placeholder="如 5;往上补先祖可用 0、-1"/></div>
-      <div class="field"><label>字辈 <span class="hint" id="charGenHint"></span></label><input type="text" id="f_char_gen"/></div>
-      <div class="field"><label>行第(排行)</label><input type="text" id="f_rank" placeholder="如 长子/次子/三女"/></div>
-      <div class="field"><label>亲属关系</label>
+      <div class="field full" id="kindNoteWrap" style="display:none"><span class="hint" id="kindNote"></span></div>
+      <div class="field fam-only"><label>世代</label><input type="text" id="f_gen" placeholder="如 5;往上补先祖可用 0、-1"/></div>
+      <div class="field fam-only"><label>字辈 <span class="hint" id="charGenHint"></span></label><input type="text" id="f_char_gen"/></div>
+      <div class="field fam-only"><label>行第(排行)</label><input type="text" id="f_rank" placeholder="如 长子/次子/三女"/></div>
+      <div class="field fam-only"><label>亲属关系</label>
         <select id="f_relation_type"><option value=""></option><option>亲生</option><option>过继</option><option>继子</option><option>养子/养女</option><option>入赘</option></select></div>
       <div class="field"><label>字号/曾用名/小名</label><input type="text" id="f_alias"/></div>
       <div class="field"><label>性别</label>
@@ -144,9 +151,9 @@
       <div class="field"><label>葬地/茔地</label><input type="text" id="f_burial"/></div>
       <div class="field"><label>在世</label>
         <select id="f_alive"><option value=""></option><option>是</option><option>否</option></select></div>
-      <div class="field"><label>父亲(从已有人物选)</label><select id="f_father_id"></select></div>
+      <div class="field fam-only"><label>父亲(从已有人物选)</label><select id="f_father_id"></select></div>
       <div class="field"><label>母</label><input type="text" id="f_mother"/></div>
-      <div class="field full"><label>父系说明(父亲不在名单/关系存疑时填文字)</label><input type="text" id="f_father_note"/></div>
+      <div class="field full fam-only"><label>父系说明(父亲不在名单/关系存疑时填文字)</label><input type="text" id="f_father_note"/></div>
       <div class="field"><label>配偶(简记)</label><input type="text" id="f_spouse" placeholder="多段婚姻见下方“婚姻”"/></div>
       <div class="field"><label>学历/职业/功名</label><input type="text" id="f_occupation"/></div>
       <div class="field"><label>居地/迁徙</label><input type="text" id="f_residence"/></div>
