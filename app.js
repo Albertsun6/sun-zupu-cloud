@@ -14,7 +14,7 @@ const $ = s => document.querySelector(s);
 const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
-const APP_VERSION = "v0.6.1";
+const APP_VERSION = "v0.7.0";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -657,6 +657,56 @@ function renderRoster(){
   box.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{ const p=byId(tr.dataset.pid); if(p){ state.canEdit?openEdit(p):openDetail(p); } });
 }
 
+/* ---------- AI 批量添加(粘贴文字 → DeepSeek 识别 → 草稿审核 → 创建)---------- */
+let _aiDrafts=[];
+const AI_DRAFT_FIELDS=[
+  {k:"name",label:"姓名"},{k:"kind",label:"类型",type:"kind"},{k:"sex",label:"性别",type:"sex"},
+  {k:"gen",label:"世代"},{k:"char_gen",label:"字辈"},{k:"rank",label:"行第"},
+  {k:"birth",label:"生年"},{k:"birth_lunar",label:"农历生"},{k:"death",label:"卒年"},
+  {k:"birth_place",label:"出生地"},{k:"occupation",label:"职业"},{k:"residence",label:"居地"},
+  {k:"spouse",label:"配偶"},{k:"mother",label:"母"},{k:"father_note",label:"父(文字)"},{k:"note",label:"备注"}
+];
+function openAI(){ $("#aiText").value=""; $("#aiMsg").textContent=""; $("#aiDrafts").innerHTML=""; $("#aiCreateBar").style.display="none"; _aiDrafts=[]; $("#aiMask").classList.add("open"); }
+async function aiParse(){
+  const text=$("#aiText").value.trim(), msg=$("#aiMsg");
+  if(!text){ msg.textContent="请先粘贴文字"; return; }
+  msg.textContent="识别中…(首次可能十几秒)"; $("#aiParse").disabled=true;
+  try{
+    const session=await window.SBAUTH.getSession(); const token=session&&session.access_token;
+    const r=await fetch("/api/ai-parse",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({text}) });
+    const data=await r.json().catch(()=>({error:"返回非JSON(可能AI代理未部署)"}));
+    if(!r.ok){ msg.textContent="失败:"+(data.error||r.status); return; }
+    _aiDrafts=(data.persons||[]).map(p=>{ const d={}; AI_DRAFT_FIELDS.forEach(f=>d[f.k]=p[f.k]!=null?String(p[f.k]):""); if(!d.father_note&&p.father) d.father_note="父:"+p.father; if(!d.kind) d.kind="本族"; return d; });
+    msg.textContent=`识别到 ${_aiDrafts.length} 人,请核对补齐后创建`;
+    renderAIDrafts();
+  }catch(e){ msg.textContent="网络/服务错误:"+e.message; }
+  finally{ $("#aiParse").disabled=false; }
+}
+function renderAIDrafts(){
+  const box=$("#aiDrafts");
+  if(!_aiDrafts.length){ box.innerHTML="<p class='hint'>没识别到人物。换段文字或手动添加。</p>"; $("#aiCreateBar").style.display="none"; return; }
+  box.innerHTML=_aiDrafts.map((d,i)=>`<div class="aidraft"><div class="aidraft-h">#${i+1} ${esc(d.name||"(未命名)")} <button class="btn btn-sm aidraft-del" data-i="${i}">删除此条</button></div><div class="aidraft-grid">`
+    + AI_DRAFT_FIELDS.map(f=>{
+        if(f.type==="kind") return `<label>${f.label}<select data-i="${i}" data-k="kind"><option${d.kind!=="外部"?" selected":""}>本族</option><option${d.kind==="外部"?" selected":""}>外部</option></select></label>`;
+        if(f.type==="sex") return `<label>${f.label}<select data-i="${i}" data-k="sex"><option value=""${!d.sex?" selected":""}></option><option${d.sex==="男"?" selected":""}>男</option><option${d.sex==="女"?" selected":""}>女</option></select></label>`;
+        return `<label>${f.label}<input data-i="${i}" data-k="${f.k}" value="${esc(d[f.k]||"")}"></label>`;
+      }).join("") + `</div></div>`).join("");
+  $("#aiCreateBar").style.display="flex";
+  box.querySelectorAll("[data-k]").forEach(e2=>{ e2.oninput=e2.onchange=()=>{ _aiDrafts[+e2.dataset.i][e2.dataset.k]=e2.value; }; });
+  box.querySelectorAll(".aidraft-del").forEach(b=>b.onclick=()=>{ _aiDrafts.splice(+b.dataset.i,1); renderAIDrafts(); });
+}
+async function aiCreateAll(){
+  const valid=_aiDrafts.filter(d=>(d.name||"").trim()); if(!valid.length){ alert("没有可创建的人物(需姓名)"); return; }
+  if(!confirm("将创建 "+valid.length+" 个人物(状态=待考)?创建后可逐个编辑/连关系。")) return;
+  const btn=$("#aiCreateAll"); btn.disabled=true; let ok=0, fail=0;
+  for(const d of valid){ try{ await api("POST","/api/persons",{ ...d, status:"待考" }); ok++; }catch(e){ fail++; } }
+  btn.disabled=false;
+  await reloadPersons(); renderOverview(); renderHeader();
+  $("#aiMsg").textContent=`已创建 ${ok} 人${fail?(",失败 "+fail):""}`;
+  _aiDrafts=[]; renderAIDrafts();
+  if(!fail) setTimeout(()=>$("#aiMask").classList.remove("open"), 1200);
+}
+
 /* ---------- 标签切换 ---------- */
 function switchView(name){
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.view===name));
@@ -711,6 +761,11 @@ $("#exShareHtml") && ($("#exShareHtml").onclick=()=>window.EXPORT.shareHtml());
 $("#exCsv")       && ($("#exCsv").onclick=()=>window.EXPORT.csv(state.share));
 $("#exGedcom")    && ($("#exGedcom").onclick=()=>window.EXPORT.gedcom());
 $("#exJson")      && ($("#exJson").onclick=()=>window.EXPORT.json(state.share));
+$("#aiBtn")       && ($("#aiBtn").onclick=openAI);
+$("#aiParse")     && ($("#aiParse").onclick=aiParse);
+$("#aiCreateAll") && ($("#aiCreateAll").onclick=aiCreateAll);
+$("#aiClose")     && ($("#aiClose").onclick=()=>$("#aiMask").classList.remove("open"));
+$("#aiMask")      && ($("#aiMask").onclick=e=>{ if(e.target===$("#aiMask")) $("#aiMask").classList.remove("open"); });
 
 /* ---------- 登录门 ---------- */
 function showLogin(){ $("#loginMask").classList.add("open"); $("#loginPw").value=""; $("#loginErr").textContent=""; }

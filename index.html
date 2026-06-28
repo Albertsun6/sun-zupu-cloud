@@ -23,6 +23,7 @@
           <button type="button" class="btn btn-sm" data-addkind="外部">＋ 外部人物</button>
         </div>
       </details>
+      <button class="btn btn-sm edit-only" id="aiBtn">🤖 AI批量</button>
       <button class="btn btn-sm" id="exShareHtml">导出分享版HTML</button>
       <button class="btn btn-sm" id="exCsv">CSV</button>
       <button class="btn btn-sm" id="exGedcom">GEDCOM</button>
@@ -185,6 +186,26 @@
       <span class="spacer"></span>
       <button class="btn" id="cancelBtn">取消</button>
       <button class="btn btn-primary edit-only" id="saveBtn">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- AI 批量添加 -->
+<div class="mask" id="aiMask">
+  <div class="modal" style="width:min(900px,100%)">
+    <h2>🤖 AI 批量添加</h2>
+    <p class="hint">粘贴一段中文(族谱片段 / 名单 / 讣告 / 简历 / 回忆…),AI 识别成人物草稿,你核对补齐后再创建。识别用 DeepSeek;创建出来的人物状态都是「待考」,可再逐个编辑/连关系。</p>
+    <textarea id="aiText" rows="6" placeholder="在此粘贴文字…例:孙德范,孙鸿德之孙,1948年生于榆树,务农;长子孙宝山,1972年生。"></textarea>
+    <div class="modal-foot">
+      <button class="btn btn-primary" id="aiParse">识别</button>
+      <span class="hint" id="aiMsg"></span>
+      <span class="spacer"></span>
+      <button class="btn" id="aiClose">关闭</button>
+    </div>
+    <div id="aiDrafts"></div>
+    <div class="modal-foot" id="aiCreateBar" style="display:none">
+      <span class="spacer"></span>
+      <button class="btn btn-primary" id="aiCreateAll">全部创建为人物</button>
     </div>
   </div>
 </div>
