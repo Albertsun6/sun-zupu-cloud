@@ -207,7 +207,10 @@ table.roster th{position:sticky;top:0;background:#f1f5f9;cursor:pointer;user-sel
 table.roster tbody tr{cursor:pointer}
 table.roster tbody tr:hover{background:#ecfdf5}
 .ver{font-size:.7rem;color:#94a3b8;font-weight:400}
-#mask.ext .fam-only{display:none!important}   /* 外部人物隐藏族谱专属字段 */
+/* 家族管理:谱头/家族配置字段 */
+.ffield{margin:.45rem 0}
+.ffield label{display:block;font-size:.82rem;color:#475569;margin-bottom:.2rem}
+.ffield input,.ffield textarea{width:100%;padding:.4rem .55rem;border:1px solid var(--line);border-radius:7px;font:inherit}
 /* AI 批量添加 */
 #aiText{width:100%;padding:.6rem;border:1px solid var(--line);border-radius:8px;font-size:.9rem;font-family:inherit;box-sizing:border-box}
 #aiDrafts{max-height:48vh;overflow:auto;margin-top:.4rem}

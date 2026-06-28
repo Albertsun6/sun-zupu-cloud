@@ -14,13 +14,14 @@ const $ = s => document.querySelector(s);
 const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
-const APP_VERSION = "v0.9.1";
+const APP_VERSION = "v0.10.0";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
-const FORM_KEYS = ["id","name","gen","char_gen","rank","relation_type","kind","alias","sex","birth",
-  "birth_lunar","birth_time","death","death_lunar","birth_place","burial","alive","mother","father_note",
-  "spouse","occupation","residence","contact","address","deeds","source","status","note"];
+// L1 节点=纯个人属性。世代(派生)/本族外部/行第/亲属关系/母/父系说明/配偶 已退出表单(关系→边层,世代→推算)。
+const FORM_KEYS = ["id","name","char_gen","alias","sex","birth",
+  "birth_lunar","birth_time","death","death_lunar","birth_place","burial","alive",
+  "occupation","residence","contact","address","deeds","source","status","note"];
 const DIRECT_LINE = new Set(["S001","S002","S004","S008","S010","S014","S019","S033","S046"]);
 const ORIG_IMG = {p1:window.photoUrl("yuanpu/p1.jpg"),p2:window.photoUrl("yuanpu/p2.jpg"),p3:window.photoUrl("yuanpu/p3.jpg"),p4:window.photoUrl("yuanpu/p4.jpg")};
 const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media"]);
@@ -29,7 +30,7 @@ const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[],
                 editing:null, user:null, canEdit:false, lineage:"",
                 graphCenter:"", graphHops:2, pathA:"", pathB:"",
                 fatherOf:{}, motherOf:{}, childrenMap:{}, spouseOf:{}, _genCache:{}, _lineageCache:{}, lineages:null,
-                filters:{charGen:"",status:"",alive:"",kind:""} };
+                filters:{charGen:"",status:"",alive:""} };
 
 // api(method,path,body) 由 db.js 提供(Supabase shim);此处不再定义。
 async function reloadPersons(){ state.persons = await api("GET","/api/persons"); }
@@ -71,9 +72,24 @@ function lineageOf(id){
   const sn=(rootName.trim()[0])||(p.name||"").trim()[0]||"其他";
   return (state._lineageCache[id]=sn+"氏");
 }
+// 本人血缘家族:有父边→父系顶祖姓;否则取本人姓(不借配偶,与 lineageOf 的"嫁入随夫"区分开)
+function surnameOfSelf(id){
+  const p=byId(id); if(!p) return null;
+  const root=byId(rootOfPatriline(id)); const nm=((root&&root.name)||p.name||"").trim();
+  return nm?nm[0]+"氏":null;
+}
+// 一人多家族(血缘 + 婚姻):自己血缘家族 ∪ 各配偶血缘家族。媳妇=娘家+夫家;两边都能筛到。
+function familiesOf(id){
+  const set=new Set(); const self=surnameOfSelf(id); if(self) set.add(self);
+  (state.spouseOf[id]||[]).forEach(sp=>{ const s=surnameOfSelf(sp); if(s) set.add(s); });
+  return set.size?[...set]:[lineageOf(id)];
+}
+function famCfg(fam){ return ((state.meta&&state.meta.families)||{})[fam]||{}; }
+// 取某人所属(父系主家族)的字辈谱;无家族配置时回退旧全局 meta.charGen(平滑迁移)
+function charGenFor(id){ const c=famCfg(lineageOf(id)).charGen; return (c&&c.length)?c:((state.meta&&state.meta.charGen)||[]); }
 function lineagesList(){
   if(state.lineages) return state.lineages;
-  const m={}; state.persons.filter(p=>!p.deleted).forEach(p=>{ const l=lineageOf(p.id); m[l]=(m[l]||0)+1; });
+  const m={}; state.persons.filter(p=>!p.deleted).forEach(p=>{ familiesOf(p.id).forEach(l=>{ m[l]=(m[l]||0)+1; }); });
   state.lineages=Object.entries(m).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
   return state.lineages;
 }
@@ -108,13 +124,12 @@ function matchQ(p){
   return [p.id,p.name,p.alias,p.note,p.deeds,p.residence,p.char_gen,p.occupation,p.birth_place,p.birth,p.death]
     .join(" ").toLowerCase().includes(state.q.toLowerCase());
 }
-function anyFilter(){ return !!(state.filters.charGen||state.filters.status||state.filters.alive||state.filters.kind); }
+function anyFilter(){ return !!(state.filters.charGen||state.filters.status||state.filters.alive); }
 function matchFilter(p){
   const f=state.filters;
   if(f.charGen && p.char_gen!==f.charGen) return false;
   if(f.status && p.status!==f.status) return false;
   if(f.alive && p.alive!==f.alive) return false;
-  if(f.kind && (p.kind||"本族")!==f.kind) return false;
   return true;
 }
 function renderFilters(){
@@ -126,18 +141,17 @@ function renderFilters(){
   fb.appendChild(mk("全部字辈","charGen",cg));
   fb.appendChild(mk("全部状态","status",["确认","存疑","待考","待补"]));
   fb.appendChild(mk("在世/已故","alive",["是","否"]));
-  fb.appendChild(mk("本族/外部","kind",["本族","外部"]));
   const lins=lineagesList();
   if(lins.length>1){ const ls=el("select"); const o0=el("option",null,"全部族谱"); o0.value=""; ls.appendChild(o0);
     lins.forEach(l=>{ const o=el("option",null,l.name+"("+l.count+")"); o.value=l.name; if(state.lineage===l.name)o.selected=true; ls.appendChild(o); });
     ls.onchange=()=>{ state.lineage=ls.value; renderFilters(); renderOverview(); if(document.getElementById("view-tree").classList.contains("active"))renderTree(); }; fb.appendChild(ls); }
   const fcEl=el("span","fcount"); fcEl.id="fcount"; fb.appendChild(fcEl);
-  if(state.q||anyFilter()){ const clr=el("button","btn btn-sm","清除"); clr.onclick=()=>{ state.q=""; $("#search").value=""; state.filters={charGen:"",status:"",alive:"",kind:""}; renderFilters(); renderOverview(); }; fb.appendChild(clr); }
+  if(state.q||anyFilter()||state.lineage){ const clr=el("button","btn btn-sm","清除"); clr.onclick=()=>{ state.q=""; $("#search").value=""; state.lineage=""; state.filters={charGen:"",status:"",alive:""}; renderFilters(); renderOverview(); }; fb.appendChild(clr); }
 }
 function renderOverview(){
   const box=$("#overview"); box.innerHTML="";
   $("#shareNote").style.display=state.share?"block":"none";
-  const list=state.persons.filter(p=>matchQ(p)&&matchFilter(p)&&(!state.lineage||lineageOf(p.id)===state.lineage));
+  const list=state.persons.filter(p=>matchQ(p)&&matchFilter(p)&&(!state.lineage||familiesOf(p.id).includes(state.lineage)));
   const fc=$("#fcount"); if(fc) fc.textContent=(state.q||anyFilter()||state.lineage)?`找到 ${list.length} 人`:`共 ${state.persons.length} 人`;
   const groups={};
   list.forEach(p=>{ const g=genOf(p.id); const gkey=(g==null?"—":g); (groups[gkey]=groups[gkey]||[]).push(p); });
@@ -194,13 +208,7 @@ async function renderTree(){
 /* ---------- 家史 ---------- */
 function renderHistory(){
   const box=$("#historyNar"); box.innerHTML="";
-  const cg=(state.meta&&state.meta.charGen)||[];
-  if(cg.length){
-    const card=el("div","panel");
-    const cells=cg.map((c,i)=>`<span class="cg-cell"><b>${i+1}</b>　${esc(c)}</span>`).join("");
-    card.innerHTML=`<h3>字辈谱(派语顺序)</h3><div class="cg-grid">${cells}</div><div class="hint">字辈按<b>父子相承</b>顺取(父“景”则子“德”);新增人物时系统据父辈自动顺推下一字。注:本谱的“第N代”编号与派语序号<b>不一定对齐</b>(早期有抵牾,见“派语说明”)。</div>`;
-    box.appendChild(card);
-  }
+  // 字辈谱已移到「家族管理」(各家族各自的派语);此处只放家史长文。
   state.narratives.forEach(n=>{
     const p=el("div","panel"); p.innerHTML=`<h3>${esc(n.title||n.key)}</h3>`;
     const ti=el("input"); ti.type="text"; ti.value=n.title||""; ti.style.marginBottom=".5rem";
@@ -210,6 +218,39 @@ function renderHistory(){
     foot.appendChild(el("span","spacer")); foot.appendChild(msg); if(state.canEdit) foot.appendChild(save);
     if(!state.canEdit){ ti.disabled=true; ta.disabled=true; }
     p.appendChild(ti); p.appendChild(ta); p.appendChild(foot); box.appendChild(p);
+  });
+}
+
+/* ---------- 家族管理(L3 配置:各家族字辈谱/显示名/堂号 + 谱头;成员由图谱动态推导)---------- */
+function parseCharGen(s){ return (s||"").split(/[\s、,，·.。\/]+/).filter(Boolean); }
+function renderFamilies(){
+  const box=$("#families"); if(!box) return; box.innerHTML="";
+  const meta=state.meta||(state.meta={}); meta.families=meta.families||{};
+  const ro=!state.canEdit;
+  const mkField=(parent,lab,val,ph)=>{ const w=el("div","ffield"); w.innerHTML=`<label>${esc(lab)}</label>`; const inp=el("input"); inp.type="text"; inp.value=val||""; if(ph)inp.placeholder=ph; if(ro)inp.disabled=true; w.appendChild(inp); parent.appendChild(w); return inp; };
+  // 谱头
+  const head=el("div","panel"); head.innerHTML=`<h3>谱头信息</h3>`;
+  const hf={}; [["title","族谱名称"],["lineage","支系/地望"],["investigator","调查/编纂"],["compiler","整理者"]].forEach(([k,lab])=>{ hf[k]=mkField(head,lab,meta[k]); });
+  if(!ro){ const foot=el("div","modal-foot"); const msg=el("span","hint"); const btn=el("button","btn btn-primary btn-sm","保存谱头");
+    btn.onclick=async()=>{ Object.keys(hf).forEach(k=>meta[k]=hf[k].value.trim()); try{ await api("PUT","/api/meta",meta); msg.textContent="已保存 ✓"; renderHeader(); }catch(e){ msg.textContent="失败:"+e.message; } };
+    foot.appendChild(el("span","spacer")); foot.appendChild(msg); foot.appendChild(btn); head.appendChild(foot); }
+  box.appendChild(head);
+  box.appendChild(el("p","note","家族由关系图谱<b>自动识别</b>(按父系姓氏),成员动态推导、无需手工指派。此处维护各家族的 字辈谱(派语)/显示名/堂号;字辈按父子相承顺取(父「景」则子「德」)。"));
+  // 各家族
+  lineagesList().forEach((l,idx)=>{
+    const fam=l.name, cfg=meta.families[fam]||{};
+    const defCG=(cfg.charGen&&cfg.charGen.length)?cfg.charGen:(idx===0?((meta.charGen)||[]):[]);
+    const card=el("div","panel");
+    card.innerHTML=`<h3>${esc(cfg.label||fam)} <span class="pill pill-info">${l.count} 人</span></h3>`;
+    if(defCG.length) card.appendChild(el("div","cg-grid", defCG.map((c,i)=>`<span class="cg-cell"><b>${i+1}</b>　${esc(c)}</span>`).join("")));
+    const labIn=mkField(card,"显示名",cfg.label||fam);
+    const cgWrap=el("div","ffield"); cgWrap.innerHTML=`<label>字辈谱(派语顺序)</label>`; const cgTa=el("textarea"); cgTa.rows=2; cgTa.value=defCG.join(" "); cgTa.placeholder="派语顺序,空格分隔,如:胤 兆 鸿 耀 景 德 宝 维 树 中"; if(ro)cgTa.disabled=true; cgWrap.appendChild(cgTa); card.appendChild(cgWrap);
+    const hallIn=mkField(card,"堂号",cfg.hall,"如 敦睦堂"); const noteIn=mkField(card,"备注/凡例",cfg.note);
+    if(!ro){ const foot=el("div","modal-foot"); const msg=el("span","hint"); const btn=el("button","btn btn-primary btn-sm","保存");
+      btn.onclick=async()=>{ meta.families[fam]={ label:labIn.value.trim()||fam, charGen:parseCharGen(cgTa.value), hall:hallIn.value.trim(), note:noteIn.value.trim() };
+        try{ await api("PUT","/api/meta",meta); msg.textContent="已保存 ✓"; state._lineageCache={}; state.lineages=null; renderFamilies(); renderHeader(); renderOverview(); renderFilters(); }catch(e){ msg.textContent="失败:"+e.message; } };
+      foot.appendChild(el("span","spacer")); foot.appendChild(msg); foot.appendChild(btn); card.appendChild(foot); }
+    box.appendChild(card);
   });
 }
 
@@ -313,9 +354,9 @@ async function renderBackup(){
   box.appendChild(panel);
 }
 
-function expectedCharGen(fatherId){   // 按父子相承:父的字辈在派语里的下一字
-  const cg=(state.meta&&state.meta.charGen)||[]; const f=fatherId&&byId(fatherId);
-  if(f&&f.char_gen&&f.char_gen!=="—"){ const i=cg.indexOf(f.char_gen); if(i>=0&&i+1<cg.length) return cg[i+1]; }
+function expectedCharGen(fatherId){   // 按父子相承:父所属家族的派语里,父字辈的下一字(字辈仍父系顺承)
+  const f=fatherId&&byId(fatherId); if(!f) return null; const cg=charGenFor(fatherId);
+  if(f.char_gen&&f.char_gen!=="—"){ const i=cg.indexOf(f.char_gen); if(i>=0&&i+1<cg.length) return cg[i+1]; }
   return null;
 }
 function charGenAuto(){
@@ -356,7 +397,7 @@ function mediaItem(md){
 
 /* ---------- 数据体检(P0-4/5) ---------- */
 function runHealth(){
-  const ps=state.persons, ids=new Set(ps.map(p=>p.id)), cg=(state.meta&&state.meta.charGen)||[];
+  const ps=state.persons, ids=new Set(ps.map(p=>p.id));
   const F=state.fatherOf;
   const out={cycle:[],dangling:[],charBreak:[],yearConflict:[],genMismatch:[],noFather:[],dupName:[]};
   ps.forEach(p=>{ const f=F[p.id]; if(f && !ids.has(f)) out.dangling.push(p); });   // 悬空父(FK通常已挡)
@@ -365,7 +406,7 @@ function runHealth(){
     while(cur && F[cur] && ids.has(F[cur])){ if(seen.has(cur)){ let x=cur; do{inCycle.add(x);x=F[x];}while(x&&x!==cur); break; } seen.add(cur); cur=F[cur]; } });
   out.cycle=ps.filter(p=>inCycle.has(p.id));
   ps.forEach(p=>{ const f=F[p.id]&&byId(F[p.id]);
-    if(f&&f.char_gen&&f.char_gen!=="—"&&p.char_gen&&p.char_gen!=="—"){ const i=cg.indexOf(f.char_gen);
+    if(f&&f.char_gen&&f.char_gen!=="—"&&p.char_gen&&p.char_gen!=="—"){ const cg=charGenFor(f.id); const i=cg.indexOf(f.char_gen);
       if(i>=0&&i+1<cg.length&&p.char_gen!==cg[i+1]) out.charBreak.push({p,why:`父${f.name}「${f.char_gen}」→子应「${cg[i+1]}」,实为「${p.char_gen}」`}); } });
   const yr=s=>{ const m=(s||"").match(/\d{4}/); return m?+m[0]:null; };
   ps.forEach(p=>{ const b=yr(p.birth),d=yr(p.death);
@@ -373,8 +414,8 @@ function runHealth(){
     const f=F[p.id]&&byId(F[p.id]); if(f){ const fb=yr(f.birth); if(b&&fb&&b<=fb) out.yearConflict.push({p,why:`生(${b}) ≤ 父${f.name}生(${fb})`}); } });
   // 手填世代 ≠ 父+1(有父边且父能定位)
   ps.forEach(p=>{ const m=parseInt(p.gen,10), f=F[p.id]; if(!isNaN(m)&&f){ const fg=genOf(f); if(fg!=null&&m!==fg+1) out.genMismatch.push({p,why:`手填第${m}代,但父${(byId(f)||{}).name||f}第${fg}代(应第${fg+1}代)`}); } });
-  // 本族但无父边且第>1代(疑缺父系连接,应补父亲让世代连续)
-  ps.forEach(p=>{ if((p.kind||"本族")==="本族" && !F[p.id]){ const g=genOf(p.id); if(g!=null&&g>1) out.noFather.push({p,why:`第${g}代但未连父亲`}); } });
+  // 无父边但推算第>1代(疑缺父系连接,应补父亲让世代连续;父系待考线索见 father_note)
+  ps.forEach(p=>{ if(!F[p.id]){ const g=genOf(p.id); if(g!=null&&g>1) out.noFather.push({p,why:`第${g}代但未连父亲`+(p.father_note?`(线索:${p.father_note})`:"")}); } });
   const bn={}; ps.forEach(p=>{ if(p.name)(bn[p.name]=bn[p.name]||[]).push(p); });
   Object.keys(bn).forEach(n=>{ if(bn[n].length>1) out.dupName.push({name:n,list:bn[n]}); });
   return out;
@@ -392,18 +433,24 @@ function renderHealth(){
   sec("② 父指向不存在/已删的人", h.dangling, p=>plink(p,"父边指向无效"));
   sec("③ 字辈不顺(父子相承)", h.charBreak, x=>plink(x.p,x.why));
   sec("④ 年代矛盾", h.yearConflict, x=>plink(x.p,x.why));
-  sec("⑤ 手填世代与推算不符", h.genMismatch, x=>plink(x.p,x.why), "pill-info");
+  sec("⑤ 残留手填世代与推算不符", h.genMismatch, x=>{ const d=el("div","hitem");
+    d.innerHTML=`<a class="plink" data-pid="${esc(x.p.id)}">${esc(x.p.name||x.p.id)}</a> <span class="hint">${esc(x.why)}</span>`
+      +(state.canEdit?` <button class="btn btn-sm useGenBtn" data-pid="${esc(x.p.id)}">采用推算(清手填)</button>`:""); return d; }, "pill-info");
   sec("⑥ 疑缺父系连接(世代断点)", h.noFather, x=>plink(x.p,x.why), "pill-info");
   sec("⑦ 重名(同名异人?需核实)", h.dupName, x=>{ const d=el("div","hitem"); d.innerHTML=`<b>${esc(x.name)}</b>: `+x.list.map(p=>`<a class="plink chip" data-pid="${esc(p.id)}">${esc(p.id)}·第${genStr(p.id)}代</a>`).join("")+(state.canEdit?` <button class="btn btn-sm mergebtn" data-name="${esc(x.name)}">合并…</button>`:""); return d; }, "pill-info");
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t){ state.canEdit?openEdit(t):openDetail(t); } });
   box.querySelectorAll(".mergebtn").forEach(b=>b.onclick=()=>{ const g=h.dupName.find(x=>x.name===b.dataset.name); if(g) openMergeDialog(g.list); });
+  box.querySelectorAll(".useGenBtn").forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); const pid=b.dataset.pid;
+    if(!confirm("清除该人手填世代,改由父系图自动推算?")) return;
+    try{ await api("PUT","/api/persons/"+encodeURIComponent(pid),{gen:""}); await reloadPersons(); await refreshRelCount(); renderHeader(); renderOverview(); renderHealth(); }
+    catch(err){ alert("失败:"+err.message); } });
 }
 // 合并对话框:选保留谁,其余并入(子女/关系/婚姻/照片/空字段都迁过去,被并入者进回收站)
 function openMergeDialog(list){
   let mask=$("#mergeMask");
   if(!mask){ mask=el("div","mask"); mask.id="mergeMask"; document.body.appendChild(mask); }
   const rows=list.map((p,i)=>{ const kids=(state.childrenMap[p.id]||[]).length;
-    return `<label class="mergerow"><input type="radio" name="mergeSurv" value="${esc(p.id)}"${i===0?" checked":""}> 保留 <b>${esc(p.name||"(无名)")}</b> <span class="hint">${esc(p.id)} · 第${genStr(p.id)}代 · ${esc(p.kind||"本族")} · 现有 ${kids} 子女</span></label>`; }).join("");
+    return `<label class="mergerow"><input type="radio" name="mergeSurv" value="${esc(p.id)}"${i===0?" checked":""}> 保留 <b>${esc(p.name||"(无名)")}</b> <span class="hint">${esc(p.id)} · 第${genStr(p.id)}代 · 现有 ${kids} 子女</span></label>`; }).join("");
   mask.innerHTML=`<div class="modal" style="width:min(540px,100%)">
     <h2>合并重名:${esc(list[0].name||"")}</h2>
     <p class="hint">选一条<b>保留</b>,其余将并入它——子女/关系/婚姻/照片/空字段都迁到保留的那条,被并入者进回收站(可恢复)。<b>不可一键撤销,请确认是同一人</b>。同名跨代是合法的,不确定就别合。</p>
@@ -457,13 +504,13 @@ async function openDetail(p){
   const R=(k,v)=>{ if(v) rows.push(`<div class="drow"><span class="dk">${k}</span><span class="dv">${esc(v)}</span></div>`); };
   R("生", [p.birth, p.birth_lunar&&("农历 "+p.birth_lunar), p.birth_time].filter(Boolean).join(" · "));
   R("卒", [p.death, p.death_lunar&&("农历 "+p.death_lunar)].filter(Boolean).join(" · "));
-  R("出生地", p.birth_place); R("葬地", p.burial); R("行第", p.rank); R("亲属关系", p.relation_type);
+  R("出生地", p.birth_place); R("葬地", p.burial);
   R("字号", p.alias); R("性别", p.sex); R("学历/职业", p.occupation); R("居地/迁徙", p.residence);
-  let fa=""; const _fid=state.fatherOf[p.id];
-  if(_fid && byId(_fid)) fa=`<a class="plink" data-pid="${esc(_fid)}">${esc(byId(_fid).name)}</a>`;
-  else if(p.father_note) fa=esc(p.father_note);
-  if(fa) rows.push(`<div class="drow"><span class="dk">父</span><span class="dv">${fa}</span></div>`);
-  R("母", p.mother); R("配偶", p.spouse);
+  const _fid=state.fatherOf[p.id];
+  if(_fid && byId(_fid)) rows.push(`<div class="drow"><span class="dk">父</span><span class="dv"><a class="plink" data-pid="${esc(_fid)}">${esc(byId(_fid).name)}</a></span></div>`);
+  else if(p.father_note) rows.push(`<div class="drow"><span class="dk">父系待考</span><span class="dv">${esc(p.father_note)} <span class="hint">(线索·待补父子关系)</span></span></div>`);
+  if(p.mother) rows.push(`<div class="drow"><span class="dk">母(原始记载)</span><span class="dv">${esc(p.mother)} <span class="hint">待整理为「母子」关系</span></span></div>`);
+  if(p.spouse) rows.push(`<div class="drow"><span class="dk">配偶(原始记载)</span><span class="dv">${esc(p.spouse)} <span class="hint">待整理为「夫妻」关系</span></span></div>`);
   if(rows.length) html+=`<div class="dgrid">${rows.join("")}</div>`;
 
   const kids=childrenOf(p.id);
@@ -525,7 +572,7 @@ async function openDetail(p){
 /* ---------- 加亲属(统一:新建人物 + 一条初始关系)---------- */
 function openAddRelative(person){
   if(!person) return; closeDetail();
-  openEdit(null, { kind:"本族", status:"待考", alive:"是", _relTo:person.id });
+  openEdit(null, { status:"待考", alive:"是", _relTo:person.id });
 }
 // 初始关系下拉:由关系字典生成(有向→2项:本人是X的「父/inverse」或「子女/forward」;对称→1项)
 function relOptions(){
@@ -575,23 +622,8 @@ function openEdit(p, prefill){
     $("#f_rel_type").value=(prefill&&prefill._relType)||"";
     $("#initRelWrap").style.display="";
   }
-  $("#charGenHint").textContent=""; charGenAuto(); applyKindUI(); initRelAuto();
+  $("#charGenHint").textContent=""; charGenAuto(); initRelAuto();
   $("#mask").classList.add("open");
-}
-// 本族/外部 切换:外部隐藏族谱专属字段;已填内容默认保留(非破坏),并提供「清空」入口
-const FAM_FIELDS=["gen","char_gen","rank","relation_type","father_id","father_note"];
-function applyKindUI(){
-  const ext = $("#f_kind") && $("#f_kind").value==="外部";
-  $("#mask").classList.toggle("ext", !!ext);
-  const wrap=$("#kindNoteWrap"); if(!wrap) return;
-  if(ext){
-    const has = FAM_FIELDS.some(k=>{ const e=$("#f_"+k); return e && (e.value||"").trim(); });
-    if(has){
-      $("#kindNote").innerHTML='已隐藏族谱专属字段(世代/字辈/行第/亲属关系/父亲),已填内容<b>仍保留</b>。确为外部人士可 <button type="button" class="btn btn-sm" id="kindClear">清空这些字段</button>';
-      wrap.style.display="";
-      $("#kindClear").onclick=()=>{ if(!confirm("清空 世代/字辈/行第/亲属关系/父亲/父系说明?(保存后生效)"))return; FAM_FIELDS.forEach(k=>{ const e=$("#f_"+k); if(e) e.value=""; }); applyKindUI(); };
-    } else wrap.style.display="none";
-  } else wrap.style.display="none";
 }
 function closeModal(){ $("#mask").classList.remove("open"); state.editing=null; }
 function collectForm(){ const d={}; FORM_KEYS.forEach(k=>{ const f=$("#f_"+k); if(f) d[k]=f.value.trim(); }); return d; }  // 父亲改走关系边,不再写 father_id 列
@@ -751,14 +783,14 @@ window.addEventListener("resize", ()=>{ const v=document.getElementById("view-gr
 
 /* ---------- 名册:全部人员表格 · 列可配置 · 可排序 · 点行编辑 ---------- */
 const ROSTER_COLS = [
-  {k:"name",label:"姓名"},{k:"kind",label:"本族/外部"},{k:"gen",label:"世代"},{k:"char_gen",label:"字辈"},
-  {k:"sex",label:"性别"},{k:"alive",label:"在世"},{k:"rel_count",label:"关系数"},{k:"lineage",label:"族谱"},{k:"rank",label:"行第"},{k:"relation_type",label:"亲属关系"},
+  {k:"name",label:"姓名"},{k:"gen",label:"世代"},{k:"char_gen",label:"字辈"},
+  {k:"sex",label:"性别"},{k:"alive",label:"在世"},{k:"rel_count",label:"关系数"},{k:"lineage",label:"族谱"},
   {k:"birth",label:"生年"},{k:"birth_lunar",label:"农历生"},{k:"birth_time",label:"出生时间"},{k:"death",label:"卒年"},
   {k:"birth_place",label:"出生地"},{k:"occupation",label:"学历/职业"},{k:"residence",label:"居地"},{k:"burial",label:"葬地"},
-  {k:"mother",label:"母"},{k:"spouse",label:"配偶"},{k:"contact",label:"联系方式"},{k:"address",label:"住址"},
+  {k:"spouse",label:"配偶(原始记载)"},{k:"contact",label:"联系方式"},{k:"address",label:"住址"},
   {k:"status",label:"状态"},{k:"note",label:"备注"},{k:"id",label:"ID"}
 ];
-const ROSTER_DEFAULT = ["name","kind","gen","char_gen","sex","alive","birth","death","occupation"];
+const ROSTER_DEFAULT = ["name","gen","char_gen","sex","alive","lineage","birth","death","occupation"];
 function rosterCols(){ try{ const s=JSON.parse(localStorage.getItem("roster_cols")||"null"); if(Array.isArray(s)&&s.length) return s; }catch(e){} return ROSTER_DEFAULT.slice(); }
 let _rosterSort={k:"gen",dir:1}, _colpickOpen=false;
 function renderRoster(){
@@ -766,37 +798,38 @@ function renderRoster(){
   const colset=new Set(rosterCols());
   const orderedCols=ROSTER_COLS.filter(c=>colset.has(c.k));
   let list=state.persons.filter(p=>!p.deleted && matchQ(p));
-  const kind=$("#rosterKind") ? $("#rosterKind").value : "";
-  if(kind) list=list.filter(p=>(p.kind||"本族")===kind);
+  const lin=$("#rosterLineage") ? $("#rosterLineage").value : "";
+  if(lin) list=list.filter(p=>familiesOf(p.id).includes(lin));
   const sk=_rosterSort.k, dir=_rosterSort.dir;
-  list=list.slice().sort((a,b)=>{ let va,vb; if(sk==="gen"){va=gk(genOf(a.id));vb=gk(genOf(b.id));} else if(sk==="rel_count"){va=state.relCount[a.id]||0;vb=state.relCount[b.id]||0;} else if(sk==="lineage"){va=lineageOf(a.id);vb=lineageOf(b.id);} else {va=(a[sk]??"")+"";vb=(b[sk]??"")+"";}
+  list=list.slice().sort((a,b)=>{ let va,vb; if(sk==="gen"){va=gk(genOf(a.id));vb=gk(genOf(b.id));} else if(sk==="rel_count"){va=state.relCount[a.id]||0;vb=state.relCount[b.id]||0;} else if(sk==="lineage"){va=familiesOf(a.id).join("/");vb=familiesOf(b.id).join("/");} else {va=(a[sk]??"")+"";vb=(b[sk]??"")+"";}
     return va<vb?-dir:va>vb?dir:0; });
   const picker=`<details class="colpick"${_colpickOpen?" open":""}><summary>列设置(${colset.size} 列)</summary><div class="colgrid">`
     + ROSTER_COLS.map(c=>`<label><input type="checkbox" data-col="${c.k}"${colset.has(c.k)?" checked":""}> ${esc(c.label)}</label>`).join("") + `</div></details>`;
   const bar=`<div class="rosterbar">${picker}`
-    + `<select id="rosterKind"><option value="">全部</option><option value="本族"${kind==="本族"?" selected":""}>本族</option><option value="外部"${kind==="外部"?" selected":""}>外部</option></select>`
+    + `<select id="rosterLineage"><option value="">全部族谱</option>`+lineagesList().map(l=>`<option value="${esc(l.name)}"${lin===l.name?" selected":""}>${esc(l.name)}(${l.count})</option>`).join("")+`</select>`
     + `<span class="hint">${list.length} 人 · 点一行${state.canEdit?"编辑":"看详情"}</span></div>`;
   const thead="<tr>"+orderedCols.map(c=>`<th data-sk="${c.k}">${esc(c.label)}${sk===c.k?(dir>0?" ▲":" ▼"):""}</th>`).join("")+"</tr>";
-  const fmt=(p,k)=> k==="kind"?(p.kind||"本族"):(k==="rel_count"?(state.relCount[p.id]||0):(k==="gen"?(genOf(p.id)??""):(k==="lineage"?lineageOf(p.id):(p[k]==null?"":p[k]))));
+  const fmt=(p,k)=> k==="rel_count"?(state.relCount[p.id]||0):(k==="gen"?(genOf(p.id)??""):(k==="lineage"?familiesOf(p.id).join(" / "):(p[k]==null?"":p[k])));
   const rows=list.map(p=>`<tr data-pid="${esc(p.id)}">`+orderedCols.map(c=>`<td>${esc(String(fmt(p,c.k)))}</td>`).join("")+`</tr>`).join("");
   box.innerHTML=bar+`<div class="rostertable"><table class="roster"><thead>${thead}</thead><tbody>${rows||""}</tbody></table></div>`;
   const dt=box.querySelector(".colpick"); if(dt) dt.ontoggle=e=>{ _colpickOpen=e.target.open; };
   box.querySelectorAll(".colpick input[type=checkbox]").forEach(cb=>cb.onchange=()=>{
     const cur=new Set(rosterCols()); cb.checked?cur.add(cb.dataset.col):cur.delete(cb.dataset.col);
     localStorage.setItem("roster_cols", JSON.stringify(ROSTER_COLS.filter(c=>cur.has(c.k)).map(c=>c.k))); renderRoster(); });
-  const rk=$("#rosterKind"); if(rk) rk.onchange=renderRoster;
+  const rk=$("#rosterLineage"); if(rk) rk.onchange=renderRoster;
   box.querySelectorAll("th[data-sk]").forEach(th=>th.onclick=()=>{ const k=th.dataset.sk; _rosterSort=(sk===k)?{k,dir:-dir}:{k,dir:1}; renderRoster(); });
   box.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{ const p=byId(tr.dataset.pid); if(p){ state.canEdit?openEdit(p):openDetail(p); } });
 }
 
 /* ---------- AI 批量添加(粘贴文字 → DeepSeek 识别 → 草稿审核 → 创建)---------- */
 let _aiDrafts=[];
+// 世代(派生)/本族外部 已不在草稿;配偶/母/父(文字)暂留(写入退役列,供 v0.11 整理为关系)。
 const AI_DRAFT_FIELDS=[
-  {k:"name",label:"姓名"},{k:"kind",label:"类型",type:"kind"},{k:"sex",label:"性别",type:"sex"},
-  {k:"gen",label:"世代"},{k:"char_gen",label:"字辈"},{k:"rank",label:"行第"},
+  {k:"name",label:"姓名"},{k:"sex",label:"性别",type:"sex"},
+  {k:"char_gen",label:"字辈"},{k:"rank",label:"行第"},
   {k:"birth",label:"生年"},{k:"birth_lunar",label:"农历生"},{k:"death",label:"卒年"},
   {k:"birth_place",label:"出生地"},{k:"occupation",label:"职业"},{k:"residence",label:"居地"},
-  {k:"spouse",label:"配偶"},{k:"mother",label:"母"},{k:"father_note",label:"父(文字)"},{k:"note",label:"备注"}
+  {k:"spouse",label:"配偶(暂存)"},{k:"mother",label:"母(暂存)"},{k:"father_note",label:"父(文字)"},{k:"note",label:"备注"}
 ];
 function openAI(){ $("#aiText").value=""; $("#aiMsg").textContent=""; $("#aiDrafts").innerHTML=""; $("#aiCreateBar").style.display="none"; _aiDrafts=[]; $("#aiMask").classList.add("open"); }
 async function aiParse(){
@@ -808,7 +841,7 @@ async function aiParse(){
     const r=await fetch("/api/ai-parse",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({text}) });
     const data=await r.json().catch(()=>({error:"返回非JSON(可能AI代理未部署)"}));
     if(!r.ok){ msg.textContent="失败:"+(data.error||r.status); return; }
-    _aiDrafts=(data.persons||[]).map(p=>{ const d={}; AI_DRAFT_FIELDS.forEach(f=>d[f.k]=p[f.k]!=null?String(p[f.k]):""); if(!d.father_note&&p.father) d.father_note="父:"+p.father; if(!d.kind) d.kind="本族"; return d; });
+    _aiDrafts=(data.persons||[]).map(p=>{ const d={}; AI_DRAFT_FIELDS.forEach(f=>d[f.k]=p[f.k]!=null?String(p[f.k]):""); if(!d.father_note&&p.father) d.father_note="父:"+p.father; return d; });
     msg.textContent=`识别到 ${_aiDrafts.length} 人,请核对补齐后创建`;
     renderAIDrafts();
   }catch(e){ msg.textContent="网络/服务错误:"+e.message; }
@@ -825,7 +858,6 @@ function renderAIDrafts(){
       ? `<span class="aidup">⚠ ${ex.length?("库中已有同名:"+ex.slice(0,3).map(p=>esc(p.name)+"(第"+genStr(p.id)+"代)").join("、")):"本批内重复"}</span><label class="aidraft-skip"><input type="checkbox" data-i="${i}" data-skip${d._skip?" checked":""}> 跳过不建</label>` : "";
     return `<div class="aidraft${d._skip?" skipped":""}"><div class="aidraft-h">#${i+1} ${esc(d.name||"(未命名)")} ${warn} <button class="btn btn-sm aidraft-del" data-i="${i}">删除此条</button></div><div class="aidraft-grid">`
     + AI_DRAFT_FIELDS.map(f=>{
-        if(f.type==="kind") return `<label>${f.label}<select data-i="${i}" data-k="kind"><option${d.kind!=="外部"?" selected":""}>本族</option><option${d.kind==="外部"?" selected":""}>外部</option></select></label>`;
         if(f.type==="sex") return `<label>${f.label}<select data-i="${i}" data-k="sex"><option value=""${!d.sex?" selected":""}></option><option${d.sex==="男"?" selected":""}>男</option><option${d.sex==="女"?" selected":""}>女</option></select></label>`;
         return `<label>${f.label}<input data-i="${i}" data-k="${f.k}" value="${esc(d[f.k]||"")}"></label>`;
       }).join("") + `</div></div>`; }).join("");
@@ -857,6 +889,7 @@ function switchView(name){
   if(name==="tree") renderTree();
   if(name==="graph") renderGraph();
   if(name==="roster") renderRoster();
+  if(name==="families") renderFamilies();
   if(name==="trash") renderTrash();
   if(name==="health") renderHealth();
   if(name==="log"){ renderBackup(); renderLog(); }
@@ -875,7 +908,6 @@ $("#gc_pathA")&&($("#gc_pathA").onchange=e=>{ state.pathA=e.target.value; render
 $("#gc_pathB")&&($("#gc_pathB").onchange=e=>{ state.pathB=e.target.value; renderGraph(); });
 $("#gc_clear")&&($("#gc_clear").onclick=()=>{ state.graphCenter=""; state.pathA=""; state.pathB=""; renderGraph(); });
 $("#f_father_id").onchange=charGenAuto;
-$("#f_kind").onchange=applyKindUI;
 $("#f_rel_person").onchange=initRelAuto;
 $("#f_rel_type").onchange=initRelAuto;
 $("#logoutBtn").onclick=async()=>{ try{ await window.SBAUTH.signOut(); }catch(e){} location.reload(); };

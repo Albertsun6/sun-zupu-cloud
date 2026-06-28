@@ -33,6 +33,7 @@
     <button class="tab" data-view="tree">家族树</button>
     <button class="tab" data-view="graph">关系图谱</button>
     <button class="tab" data-view="history">家史</button>
+    <button class="tab" data-view="families">家族管理</button>
     <button class="tab" data-view="verify">待核实</button>
     <button class="tab" data-view="health">数据体检</button>
     <button class="tab" data-view="source">原谱影像与原文</button>
@@ -68,6 +69,7 @@
     <div id="graphBox" style="height:66vh"></div>
   </section>
   <section class="view" id="view-history"><div id="historyNar"></div></section>
+  <section class="view" id="view-families"><div id="families"></div></section>
   <section class="view" id="view-verify">
     <div class="toolbar" style="margin-bottom:.8rem">
       <button class="btn btn-primary btn-sm edit-only" id="addVerify">+ 新增待核实项</button>
@@ -127,17 +129,11 @@
     <div class="grid2">
       <div class="field"><label>ID(自动生成)</label><input type="text" id="f_id" readonly placeholder="保存后自动生成" style="background:#f1f5f9;color:#94a3b8"/></div>
       <div class="field"><label>姓名</label><input type="text" id="f_name"/></div>
-      <div class="field"><label>类型(本族/外部)</label><select id="f_kind"><option>本族</option><option>外部</option></select></div>
-      <div class="field full" id="kindNoteWrap" style="display:none"><span class="hint" id="kindNote"></span></div>
       <div class="field full" id="initRelWrap" style="display:none">
         <label>初始关系(可选 · 新建时一次连好)</label>
         <div class="initrel">本人 是 <select id="f_rel_person"></select> 的 <select id="f_rel_type"></select> <span class="hint" id="initRelHint"></span></div>
       </div>
-      <div class="field fam-only"><label>世代(自动推算·可留空)</label><input type="text" id="f_gen" placeholder="留空=按父系自动推算;填了则作锚点覆盖"/></div>
-      <div class="field fam-only"><label>字辈 <span class="hint" id="charGenHint"></span></label><input type="text" id="f_char_gen"/></div>
-      <div class="field fam-only"><label>行第(排行)</label><input type="text" id="f_rank" placeholder="如 长子/次子/三女"/></div>
-      <div class="field fam-only"><label>亲属关系</label>
-        <select id="f_relation_type"><option value=""></option><option>亲生</option><option>过继</option><option>继子</option><option>养子/养女</option><option>入赘</option></select></div>
+      <div class="field"><label>字辈(派字) <span class="hint" id="charGenHint"></span></label><input type="text" id="f_char_gen"/></div>
       <div class="field"><label>字号/曾用名/小名</label><input type="text" id="f_alias"/></div>
       <div class="field"><label>性别</label>
         <select id="f_sex"><option value=""></option><option>男</option><option>女</option></select></div>
@@ -150,10 +146,7 @@
       <div class="field"><label>葬地/茔地</label><input type="text" id="f_burial"/></div>
       <div class="field"><label>在世</label>
         <select id="f_alive"><option value=""></option><option>是</option><option>否</option></select></div>
-      <div class="field fam-only"><label>父亲(从已有人物选)</label><select id="f_father_id"></select></div>
-      <div class="field"><label>母</label><input type="text" id="f_mother"/></div>
-      <div class="field full fam-only"><label>父系说明(父亲不在名单/关系存疑时填文字)</label><input type="text" id="f_father_note"/></div>
-      <div class="field"><label>配偶(简记)</label><input type="text" id="f_spouse" placeholder="多段婚姻见下方“婚姻”"/></div>
+      <div class="field full"><label>父亲(从已有人物选 · 建立父子关系边)</label><select id="f_father_id"></select></div>
       <div class="field"><label>学历/职业/功名</label><input type="text" id="f_occupation"/></div>
       <div class="field"><label>居地/迁徙</label><input type="text" id="f_residence"/></div>
       <div class="field"><label>联系方式 <span class="lock">敏感·分享版隐藏</span></label><input type="text" id="f_contact" placeholder="电话/微信/邮箱"/></div>
@@ -203,9 +196,9 @@
 </div>
 
 <!-- ?v= 随版本递增,确保部署后浏览器加载最新代码(改版本时同步改这里) -->
-<script src="config.js?v=0.9.1"></script>
-<script type="module" src="db.js?v=0.9.1"></script>
-<script type="module" src="app.js?v=0.9.1"></script>
-<script type="module" src="calendar.js?v=0.9.1"></script>
+<script src="config.js?v=0.10.0"></script>
+<script type="module" src="db.js?v=0.10.0"></script>
+<script type="module" src="app.js?v=0.10.0"></script>
+<script type="module" src="calendar.js?v=0.10.0"></script>
 </body>
 </html>
