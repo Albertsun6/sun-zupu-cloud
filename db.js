@@ -248,6 +248,52 @@ async function delRelationship(id){
 }
 window.REL = { types:listRelTypes, all:listRelationships, of:relationsOf, add:addRelationship, update:updateRelationship, del:delRelationship };
 
+// ---------- 去重:同名检测 + 人工确认的合并 ----------
+async function findSameName(name, excludeId){
+  name=(name||"").trim(); if(!name) return [];
+  const rows = must(await sb.from("persons").select("id,name,gen,kind").eq("name",name).eq("deleted",0));
+  return rows.filter(r=>r.id!==excludeId);
+}
+// 把 dup 并入 survivor:迁移 子女/关系/婚姻/照片,survivor 补空,dup 进回收站,留痕。不自动撤销。
+async function mergePersons(survivorId, dupId){
+  if(survivorId===dupId) throw new Error("不能合并到自己");
+  const sur=await getPerson(survivorId), dup=await getPerson(dupId);
+  if(!sur||!dup) throw new Error("人物不存在");
+  const c={children:0,relations:0,marriages:0,media:0};
+  // 1) 子女改父
+  const kids=must(await sb.from("persons").select("id").eq("father_id",dupId)); c.children=kids.length;
+  if(kids.length) must(await sb.from("persons").update({father_id:survivorId}).eq("father_id",dupId));
+  // 2) 关系迁移(处理自环/撞重复/对称规范序)
+  const rels=must(await sb.from("relationships").select("*").or("from_id.eq."+dupId+",to_id.eq."+dupId));
+  const existing=must(await sb.from("relationships").select("from_id,to_id,type").or("from_id.eq."+survivorId+",to_id.eq."+survivorId));
+  const keyOf=(f,t,ty)=>f+"|"+t+"|"+ty;
+  const surSet=new Set(existing.map(r=>keyOf(r.from_id,r.to_id,r.type)));
+  for(const r of rels){
+    let f=r.from_id===dupId?survivorId:r.from_id, t=r.to_id===dupId?survivorId:r.to_id;
+    if(f===t){ must(await sb.from("relationships").delete().eq("id",r.id)); continue; }      // 自环
+    if(!r.directed && f>t){ const x=f; f=t; t=x; }                                            // 对称规范序
+    if(surSet.has(keyOf(f,t,r.type))){ must(await sb.from("relationships").delete().eq("id",r.id)); continue; } // 撞重复
+    must(await sb.from("relationships").update({from_id:f,to_id:t}).eq("id",r.id));
+    surSet.add(keyOf(f,t,r.type)); c.relations++;
+  }
+  // 3) 婚姻
+  const marr=must(await sb.from("marriages").select("id").eq("person_id",dupId)); c.marriages=marr.length;
+  if(marr.length) must(await sb.from("marriages").update({person_id:survivorId}).eq("person_id",dupId));
+  // 4) 照片
+  const med=must(await sb.from("media").select("id").eq("person_id",dupId)); c.media=med.length;
+  if(med.length){ must(await sb.from("media").update({person_id:survivorId}).eq("person_id",dupId)); await refreshPrimary(survivorId); }
+  // 5) survivor 补空(不覆盖已填)
+  const patch={};
+  EDITABLE.forEach(k=>{ if((!sur[k]||(""+sur[k]).trim()==="") && dup[k] && (""+dup[k]).trim()!=="") patch[k]=dup[k]; });
+  if(Object.keys(patch).length){ patch.updated_at=nowStr(); must(await sb.from("persons").update(patch).eq("id",survivorId)); }
+  // 6) dup 进回收站(此时已无引用)
+  must(await sb.from("persons").update({ deleted:1, deleted_at:nowStr() }).eq("id",dupId));
+  // 7) 留痕(history 原 entity_id 不动,保留各自审计)
+  await logHist("merge","person",survivorId,"合并: "+(dup.name||dupId)+"("+dupId+")→"+(sur.name||survivorId)+"("+survivorId+");迁移 子女"+c.children+"/关系"+c.relations+"/婚姻"+c.marriages+"/照片"+c.media, dup, null);
+  return { ok:true, ...c };
+}
+window.DEDUP = { sameName:findSameName, merge:mergePersons };
+
 // ---------- REST 兼容 shim:让 app.js 的 api() 调用零改动 ----------
 async function api(method, path, body){
   const u = new URL(path, location.origin); const p = u.pathname; method = method.toUpperCase();

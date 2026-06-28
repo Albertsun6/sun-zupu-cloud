@@ -14,7 +14,7 @@ const $ = s => document.querySelector(s);
 const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
-const APP_VERSION = "v0.7.0";
+const APP_VERSION = "v0.8.0";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -355,8 +355,37 @@ function renderHealth(){
   sec("③ 父指向不存在/已删/回收站的人", h.dangling, p=>plink(p,"父ID="+p.father_id));
   sec("④ 字辈不顺(父子相承)", h.charBreak, x=>plink(x.p,x.why));
   sec("⑤ 年代矛盾", h.yearConflict, x=>plink(x.p,x.why));
-  sec("⑥ 重名(同名异人?需核实)", h.dupName, x=>{ const d=el("div","hitem"); d.innerHTML=`<b>${esc(x.name)}</b>: `+x.list.map(p=>`<a class="plink chip" data-pid="${esc(p.id)}">${esc(p.id)}·第${esc(p.gen)}代</a>`).join(""); return d; }, "pill-info");
+  sec("⑥ 重名(同名异人?需核实)", h.dupName, x=>{ const d=el("div","hitem"); d.innerHTML=`<b>${esc(x.name)}</b>: `+x.list.map(p=>`<a class="plink chip" data-pid="${esc(p.id)}">${esc(p.id)}·第${esc(p.gen)}代</a>`).join("")+(state.canEdit?` <button class="btn btn-sm mergebtn" data-name="${esc(x.name)}">合并…</button>`:""); return d; }, "pill-info");
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t){ state.canEdit?openEdit(t):openDetail(t); } });
+  box.querySelectorAll(".mergebtn").forEach(b=>b.onclick=()=>{ const g=h.dupName.find(x=>x.name===b.dataset.name); if(g) openMergeDialog(g.list); });
+}
+// 合并对话框:选保留谁,其余并入(子女/关系/婚姻/照片/空字段都迁过去,被并入者进回收站)
+function openMergeDialog(list){
+  let mask=$("#mergeMask");
+  if(!mask){ mask=el("div","mask"); mask.id="mergeMask"; document.body.appendChild(mask); }
+  const rows=list.map((p,i)=>{ const kids=state.persons.filter(x=>x.father_id===p.id&&!x.deleted).length;
+    return `<label class="mergerow"><input type="radio" name="mergeSurv" value="${esc(p.id)}"${i===0?" checked":""}> 保留 <b>${esc(p.name||"(无名)")}</b> <span class="hint">${esc(p.id)} · 第${esc(p.gen||"?")}代 · ${esc(p.kind||"本族")} · 现有 ${kids} 子女</span></label>`; }).join("");
+  mask.innerHTML=`<div class="modal" style="width:min(540px,100%)">
+    <h2>合并重名:${esc(list[0].name||"")}</h2>
+    <p class="hint">选一条<b>保留</b>,其余将并入它——子女/关系/婚姻/照片/空字段都迁到保留的那条,被并入者进回收站(可恢复)。<b>不可一键撤销,请确认是同一人</b>。同名跨代是合法的,不确定就别合。</p>
+    ${rows}
+    <div class="err" id="mergeErr"></div>
+    <div class="modal-foot"><span class="spacer"></span><button class="btn" id="mergeCancel">取消</button><button class="btn btn-primary" id="mergeOk">确认合并</button></div>
+  </div>`;
+  mask.classList.add("open");
+  $("#mergeCancel").onclick=()=>mask.classList.remove("open");
+  mask.onclick=e=>{ if(e.target===mask) mask.classList.remove("open"); };
+  $("#mergeOk").onclick=async()=>{
+    const surv=mask.querySelector("input[name=mergeSurv]:checked").value;
+    const dups=list.filter(p=>p.id!==surv);
+    if(!dups.length){ $("#mergeErr").textContent="至少要有另一条并入"; return; }
+    if(!confirm("确认把 "+dups.length+" 条并入「"+((byId(surv)||{}).name||surv)+"」?不可一键撤销。")) return;
+    $("#mergeOk").disabled=true; $("#mergeErr").textContent="合并中…";
+    try{ for(const d of dups){ await window.DEDUP.merge(surv, d.id); }
+      mask.classList.remove("open"); await reloadPersons(); renderHeader(); renderOverview(); renderHealth(); }
+    catch(e){ $("#mergeErr").textContent="失败:"+e.message; }
+    $("#mergeOk").disabled=false;
+  };
 }
 
 /* ---------- 人物只读详情(P0-1/2/3) ---------- */
@@ -453,10 +482,34 @@ function openAddChild(parent){
   openEdit(null, { father_id:parent.id, gen:isNaN(g)?"":String(g+1),
     char_gen:expectedCharGen(parent.id)||"", status:"待考", alive:"是" });
 }
-function openAddSpouse(parent){    // 打开本人编辑,直达"婚姻"区(点"+添加婚姻"录入),不预创建空记录避免污染
+function openAddSpouse(parent){    // 配偶成为正式人物(本族),用「夫妻」关系连;可新建或从已有人物选
   if(!parent) return;
-  closeDetail(); openEdit(parent);
-  $("#modalErr").innerHTML='<span style="color:#047857">在下方“婚姻”区点“+ 添加婚姻”录入配偶。</span>';
+  let mask=$("#spouseMask");
+  if(!mask){ mask=el("div","mask"); mask.id="spouseMask"; document.body.appendChild(mask); }
+  const oppSex = parent.sex==="男"?"女":(parent.sex==="女"?"男":"");
+  mask.innerHTML=`<div class="modal" style="width:min(460px,100%)">
+    <h2>给「${esc(parent.name||parent.id)}」加配偶</h2>
+    <p class="hint">配偶会成为正式人物(本族),用「夫妻」关系相连。可新建,或从已有人物里选。</p>
+    <div class="field"><label>从已有人物选</label><select id="spouseSel"><option value="">— 不选,改为新建 —</option>${personOptions()}</select></div>
+    <div class="err" id="spouseErr"></div>
+    <div class="modal-foot"><button class="btn" id="spouseNew">+ 新建配偶</button><span class="spacer"></span><button class="btn" id="spouseCancel">取消</button><button class="btn btn-primary" id="spouseLink">连接所选</button></div>
+  </div>`;
+  mask.classList.add("open");
+  $("#spouseCancel").onclick=()=>mask.classList.remove("open");
+  mask.onclick=e=>{ if(e.target===mask) mask.classList.remove("open"); };
+  $("#spouseNew").onclick=()=>{ mask.classList.remove("open"); closeDetail();
+    openEdit(null,{ kind:"本族", sex:oppSex, gen:parent.gen||"", status:"待考", alive:"是" });
+    state.pendingSpouseOf=parent.id;
+    $("#modalErr").innerHTML='<span style="color:#047857">填写这位配偶的信息,保存后会自动与「'+esc(parent.name||"")+'」建立夫妻关系。</span>'; };
+  $("#spouseLink").onclick=async()=>{
+    const sid=$("#spouseSel").value;
+    if(!sid){ $("#spouseErr").textContent="请选人,或点「新建配偶」"; return; }
+    if(sid===parent.id){ $("#spouseErr").textContent="不能和自己结为配偶"; return; }
+    $("#spouseLink").disabled=true; $("#spouseErr").textContent="";
+    try{ await window.REL.add({from_id:parent.id,to_id:sid,type:"spouse"}); mask.classList.remove("open"); await reloadPersons(); const p=byId(parent.id); if(p) openDetail(p); }
+    catch(e){ $("#spouseErr").textContent="失败:"+(/duplicate|unique/i.test(e.message)?"两人已是配偶":e.message); }
+    $("#spouseLink").disabled=false;
+  };
 }
 
 /* ---------- 人物详情/编辑弹窗 ---------- */
@@ -468,7 +521,7 @@ function fillFatherSelect(currentId, selected){
   });
 }
 function openEdit(p, prefill){
-  state.editing=p?p.id:null;
+  state.editing=p?p.id:null; state.pendingSpouseOf=null;
   const fa=prefill&&prefill.father_id&&byId(prefill.father_id);
   $("#modalTitle").textContent=p?("详情 / 编辑:"+(p.name||p.id)):(fa?("添加子女(父:"+(fa.name||"")+")"):((prefill&&prefill.kind==="外部")?"添加外部人物":"添加本族人物(保存后可加照片/婚姻)"));
   $("#delBtn").style.display=p?"inline-block":"none";
@@ -495,18 +548,23 @@ function applyKindUI(){
     } else wrap.style.display="none";
   } else wrap.style.display="none";
 }
-function closeModal(){ $("#mask").classList.remove("open"); state.editing=null; }
+function closeModal(){ $("#mask").classList.remove("open"); state.editing=null; state.pendingSpouseOf=null; }
 function collectForm(){ const d={}; FORM_KEYS.forEach(k=>{ const f=$("#f_"+k); if(f) d[k]=f.value.trim(); }); d.father_id=$("#f_father_id").value; return d; }
 async function saveModal(){
   const d=collectForm();
   try{
     if(state.editing){ await api("PUT","/api/persons/"+encodeURIComponent(state.editing),d); closeModal(); await reloadPersons(); renderHeader(); renderOverview(); }
     else{
+      if(d.name){ const same=await window.DEDUP.sameName(d.name,null);
+        if(same.length && !confirm("已有 "+same.length+" 个同名:"+same.map(s=>(s.name)+"(第"+(s.gen||"?")+"代)").join("、")+"。\n同名可能是不同人。仍要创建?")) return; }
       const row=await api("POST","/api/persons",d);
       state.editing=row.id; $("#f_id").value=row.id;
       $("#modalTitle").textContent="详情 / 编辑:"+(row.name||row.id);
       $("#delBtn").style.display="inline-block";
-      $("#modalErr").innerHTML='<span style="color:#047857">已创建,可继续上传照片 / 添加婚姻;或点关闭。</span>';
+      let extra="";
+      if(state.pendingSpouseOf){ const hb=state.pendingSpouseOf; state.pendingSpouseOf=null;
+        try{ await window.REL.add({from_id:hb,to_id:row.id,type:"spouse"}); extra=" 已与「"+(((byId(hb)||{}).name)||hb)+"」建立夫妻关系。"; }catch(e){ extra=" (夫妻关系建立失败:"+e.message+")"; } }
+      $("#modalErr").innerHTML='<span style="color:#047857">已创建,可继续上传照片 / 添加婚姻;或点关闭。'+esc(extra)+'</span>';
       await reloadPersons(); renderHeader(); renderOverview();
       fillFatherSelect(row.id, d.father_id); renderMarriages(row.id); renderMedia(row.id);
     }
@@ -685,19 +743,28 @@ async function aiParse(){
 function renderAIDrafts(){
   const box=$("#aiDrafts");
   if(!_aiDrafts.length){ box.innerHTML="<p class='hint'>没识别到人物。换段文字或手动添加。</p>"; $("#aiCreateBar").style.display="none"; return; }
-  box.innerHTML=_aiDrafts.map((d,i)=>`<div class="aidraft"><div class="aidraft-h">#${i+1} ${esc(d.name||"(未命名)")} <button class="btn btn-sm aidraft-del" data-i="${i}">删除此条</button></div><div class="aidraft-grid">`
+  const existing={}; state.persons.filter(p=>!p.deleted).forEach(p=>{ if(p.name)(existing[p.name]=existing[p.name]||[]).push(p); });
+  const seen={};
+  box.innerHTML=_aiDrafts.map((d,i)=>{
+    const nm=(d.name||"").trim(); const ex=nm?(existing[nm]||[]):[]; const batchDup=!!(nm&&seen[nm]); if(nm) seen[nm]=(seen[nm]||0)+1;
+    const warn=(ex.length||batchDup)
+      ? `<span class="aidup">⚠ ${ex.length?("库中已有同名:"+ex.slice(0,3).map(p=>esc(p.name)+"(第"+(p.gen||"?")+"代)").join("、")):"本批内重复"}</span><label class="aidraft-skip"><input type="checkbox" data-i="${i}" data-skip${d._skip?" checked":""}> 跳过不建</label>` : "";
+    return `<div class="aidraft${d._skip?" skipped":""}"><div class="aidraft-h">#${i+1} ${esc(d.name||"(未命名)")} ${warn} <button class="btn btn-sm aidraft-del" data-i="${i}">删除此条</button></div><div class="aidraft-grid">`
     + AI_DRAFT_FIELDS.map(f=>{
         if(f.type==="kind") return `<label>${f.label}<select data-i="${i}" data-k="kind"><option${d.kind!=="外部"?" selected":""}>本族</option><option${d.kind==="外部"?" selected":""}>外部</option></select></label>`;
         if(f.type==="sex") return `<label>${f.label}<select data-i="${i}" data-k="sex"><option value=""${!d.sex?" selected":""}></option><option${d.sex==="男"?" selected":""}>男</option><option${d.sex==="女"?" selected":""}>女</option></select></label>`;
         return `<label>${f.label}<input data-i="${i}" data-k="${f.k}" value="${esc(d[f.k]||"")}"></label>`;
-      }).join("") + `</div></div>`).join("");
+      }).join("") + `</div></div>`; }).join("");
   $("#aiCreateBar").style.display="flex";
   box.querySelectorAll("[data-k]").forEach(e2=>{ e2.oninput=e2.onchange=()=>{ _aiDrafts[+e2.dataset.i][e2.dataset.k]=e2.value; }; });
+  box.querySelectorAll("[data-skip]").forEach(cb=>cb.onchange=()=>{ _aiDrafts[+cb.dataset.i]._skip=cb.checked; renderAIDrafts(); });
   box.querySelectorAll(".aidraft-del").forEach(b=>b.onclick=()=>{ _aiDrafts.splice(+b.dataset.i,1); renderAIDrafts(); });
 }
 async function aiCreateAll(){
-  const valid=_aiDrafts.filter(d=>(d.name||"").trim()); if(!valid.length){ alert("没有可创建的人物(需姓名)"); return; }
-  if(!confirm("将创建 "+valid.length+" 个人物(状态=待考)?创建后可逐个编辑/连关系。")) return;
+  const valid=_aiDrafts.filter(d=>(d.name||"").trim() && !d._skip);
+  const skipped=_aiDrafts.filter(d=>(d.name||"").trim() && d._skip).length;
+  if(!valid.length){ alert("没有可创建的人物(需姓名,且未勾「跳过」)"); return; }
+  if(!confirm("将创建 "+valid.length+" 个人物(状态=待考)"+(skipped?(",跳过 "+skipped+" 条疑似重复"):"")+"?")) return;
   const btn=$("#aiCreateAll"); btn.disabled=true; let ok=0, fail=0;
   for(const d of valid){ try{ await api("POST","/api/persons",{ ...d, status:"待考" }); ok++; }catch(e){ fail++; } }
   btn.disabled=false;
