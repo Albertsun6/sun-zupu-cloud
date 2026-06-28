@@ -1,0 +1,10 @@
+{
+  "name": "谱系 · 人物关系图谱",
+  "short_name": "谱系",
+  "description": "从家谱到人脉,一图记清每个人和每段关系。",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#fafaf9",
+  "theme_color": "#047857",
+  "lang": "zh-CN"
+}

@@ -14,7 +14,8 @@ const $ = s => document.querySelector(s);
 const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
-const APP_VERSION = "v0.10.0";
+const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
+const APP_VERSION = "v0.11.0";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -110,11 +111,12 @@ function renderAuthBar(){       // 显示当前登录者 + 角色;viewer 隐藏�
 }
 function renderHeader(){
   const m=state.meta||{};
-  $("#subtitle").textContent=(m.lineage?("· "+m.lineage):"")+(m.charGen?("  字辈:"+m.charGen.join("·")):"");
+  // 品牌名固定=谱系;副标题=当前这本谱(meta.title)+ 地望,不让数据顶掉品牌名
+  $("#subtitle").textContent=(m.title?("· "+m.title):"")+(m.lineage?("  "+m.lineage):"");
   const total=state.persons.length, alive=state.persons.filter(p=>p.alive==="是").length;
   const todo=state.verify.filter(v=>!/已?确认/.test(v.status||"")).length;
   $("#stats").textContent=`共 ${total} 人 · 在世 ${alive} · 待核实 ${todo} 项`;
-  $("#title").firstChild.textContent=(m.title||"孙氏族谱")+" ";
+  $("#title").firstChild.textContent=APP_NAME+" ";
 }
 
 /* ---------- 世系总览 ---------- */
@@ -178,7 +180,7 @@ function personCard(p){
     meta2=[p.residence,p.occupation,p.father_note].filter(Boolean).join(" · ");
   }
   c.innerHTML=`<div class="card-row">${thumb}<div class="card-main">`
-    +`<div class="nm">${esc(p.name||"(无名)")} ${living?'<span class="tag">在世</span>':""} ${statusPill(p.status)}</div>`
+    +`<div class="nm">${esc(p.name||"(无名)")} ${living?'<span class="tag">在世</span>':""} ${statusPill(p.status)}${state.relCount[p.id]?`<span class="relcount" title="关系数,点开看关系网">关系 ${state.relCount[p.id]}</span>`:""}</div>`
     +(sub?`<div class="sub">${esc(sub)}</div>`:"")+(meta2?`<div class="meta2">${esc(meta2)}</div>`:"")
     +`</div></div>`;
   return c;
@@ -547,24 +549,35 @@ async function openDetail(p){
       byCat[cat].forEach(it=>{ rh+=`<div class="ditem"><span class="reltag" style="border-color:${esc(it.color||'#cbd5e1')};color:${esc(it.color||'#475569')}">${esc(it.lab)}</span> <a class="plink" data-pid="${esc(it.op.id)}">${esc(it.op.name||'(无名)')}</a>${it.r.note?`<span class="hint"> · ${esc(it.r.note)}</span>`:""}${state.canEdit?` <button class="btn btn-sm relnote" data-rid="${it.r.id}" title="改备注">改</button><button class="btn btn-sm reldel" data-rid="${it.r.id}" title="删除">✕</button>`:""}</div>`; });
     });
   } else rh=`<div class="hint">(暂无关系)</div>`;
-  const addForm = state.canEdit ? `<div class="relquick" id="relAddForm" style="display:none">本人 是 <select id="dq_to"></select> 的 <select id="dq_type"></select> <input id="dq_note" placeholder="备注(可空,如原配/续娶)"> <button class="btn btn-sm btn-primary" id="dq_add">加</button> <span class="hint" id="dq_msg"></span></div>` : "";
+  const addForm = state.canEdit ? `<div class="relquick" id="relAddForm" style="display:none"><select id="dq_to"></select><span id="dqNewWrap" style="display:none">姓名 <input id="dq_newname" placeholder="新人物姓名" style="width:7em"> <select id="dq_newsex"><option value="">性别</option><option>男</option><option>女</option></select></span> 是 <b>${esc(p.name||"本人")}</b> 的 <select id="dq_type"></select> <input id="dq_note" placeholder="备注(可空,如 原配/续娶)" style="width:9em"> <button class="btn btn-sm btn-primary" id="dq_add">加</button> <span class="hint" id="dq_msg"></span></div>` : "";
   html+=`<div class="dsec"><div class="dsec-h">关系网(${rels.length}) <button class="btn btn-sm" id="relEgoBtn">🎯 关系圈</button>${state.canEdit?` <button class="btn btn-sm" id="relAddToggle">+ 加关系</button>`:""}</div>${addForm}${rh}</div>`;
   box.innerHTML=html;
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });
   { const eb=$("#relEgoBtn"); if(eb) eb.onclick=()=>{ state.graphCenter=p.id; state.pathA=""; state.pathB=""; closeDetail(); switchView("graph"); }; }
-  box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?"))return; try{ await window.REL.del(+b.dataset.rid); await refreshRelCount(); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
+  box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?(直接删除,不可恢复;人物本身不受影响)"))return; try{ await window.REL.del(+b.dataset.rid); await reloadPersons(); await refreshRelCount(); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
   box.querySelectorAll(".relnote").forEach(b=>b.onclick=async()=>{ const cur=(rels.find(r=>String(r.id)===b.dataset.rid)||{}).note||""; const nv=prompt("关系备注(如 原配/续娶/侧室):",cur); if(nv===null)return; try{ await window.REL.update(+b.dataset.rid,{note:nv.trim()}); openDetail(byId(p.id)); }catch(e){ alert("失败:"+e.message); } });
   const tgl=$("#relAddToggle");
   if(tgl) tgl.onclick=()=>{ const f=$("#relAddForm"); const show=f.style.display==="none"; f.style.display=show?"":"none";
-    if(show){ $("#dq_to").innerHTML=`<option value="">选人物</option>`+personOptions(); $("#dq_type").innerHTML=`<option value="">选关系</option>`+relOptions().map(o=>`<option value="${o.val}">${esc(o.label)}</option>`).join(""); } };
+    if(show){ $("#dq_to").innerHTML=`<option value="">— 选已有人物 —</option><option value="__new__">➕ 新建人物并连上…</option>`+personOptions(); $("#dq_type").innerHTML=relOptionsHtml(); const dn=$("#dqNewWrap"); if(dn)dn.style.display="none"; const t=$("#dq_to"); if(t)t.focus(); } };
+  { const dto=$("#dq_to"); if(dto) dto.onchange=()=>{ const nw=$("#dqNewWrap"); if(nw) nw.style.display=(dto.value==="__new__")?"":"none"; }; }
   const dqAdd=$("#dq_add");
   if(dqAdd) dqAdd.onclick=async()=>{
-    const to=$("#dq_to").value, rt=$("#dq_type").value, note=$("#dq_note").value.trim(), msg=$("#dq_msg");
-    if(!to||!rt){ msg.textContent="选人物和关系"; return; }
-    if(to===p.id){ msg.textContent="不能和自己"; return; }
-    const [type,side]=rt.split("|"); let from,toId; if(side==="f"){ from=to; toId=p.id; } else { from=p.id; toId=to; }
-    try{ await window.REL.add({from_id:from,to_id:toId,type,note}); await refreshRelCount(); openDetail(byId(p.id)); }
-    catch(e){ msg.textContent=(/duplicate|unique/i.test(e.message)?"该关系已存在":e.message); }
+    const sel=$("#dq_to").value, rt=$("#dq_type").value, note=$("#dq_note").value.trim(), msg=$("#dq_msg");
+    if(!sel||!rt){ msg.textContent="请选人物和关系"; return; }
+    const {type, fromIsX, need}=resolveRel(rt, p.sex);    // 先判定(尤其"孩子"需当前人性别),避免 __new__ 建了人却连不上
+    if(!type){ msg.textContent="「孩子」需先知道"+(p.name||"本人")+"的性别——请在「编辑」里填好性别再加"; return; }
+    try{
+      let other=sel;
+      if(sel==="__new__"){ const nm=($("#dq_newname").value||"").trim(); if(!nm){ msg.textContent="请填新人物姓名"; return; }
+        const np=await api("POST","/api/persons",{name:nm, sex:$("#dq_newsex").value, status:"待考"}); other=np.id; }
+      if(other===p.id){ msg.textContent="不能和自己建立关系"; return; }
+      const from=fromIsX?other:p.id, to=fromIsX?p.id:other;
+      await window.REL.add({from_id:from,to_id:to,type,note});
+      const oname=((byId(other)||{}).name)||($("#dq_newname")&&$("#dq_newname").value.trim())||other;
+      await reloadPersons(); await refreshRelCount(); await openDetail(byId(p.id));
+      const t=$("#relAddToggle"); if(t) t.click();                                  // 重新展开,连续录入
+      const m=$("#dq_msg"); if(m) m.textContent="已加:"+oname+" ✓ 可继续添加下一条";
+    }catch(e){ const m=$("#dq_msg"); if(m) m.textContent=(/duplicate|unique/i.test(e.message)?"该关系已存在":("失败:"+e.message)); }
   };
   $("#detailMask").classList.add("open");
 }
@@ -574,16 +587,37 @@ function openAddRelative(person){
   if(!person) return; closeDetail();
   openEdit(null, { status:"待考", alive:"是", _relTo:person.id });
 }
-// 初始关系下拉:由关系字典生成(有向→2项:本人是X的「父/inverse」或「子女/forward」;对称→1项)
+// 关系下拉,句式「[X] 是 [当前人] 的 [label]」:有向给两向(X为长辈→父/母/老师/上级;X为晚辈→孩子/学生/下属),对称一项;按 category 分组
+const _relNice = l => ({"子女":"孩子","父":"父亲","母":"母亲"}[l]||l);
 function relOptions(){
   const opts=[];
-  (state.relTypes||[]).forEach(t=>{
-    if(t.is_symmetric){ opts.push({val:t.type+"|s", label:(t.forward_label||t.label_zh)}); }
-    else { opts.push({val:t.type+"|i", label:(t.inverse_label||t.label_zh)});
-      let fl=t.forward_label||t.label_zh; if(fl==="子女") fl="子女("+(t.inverse_label||"父")+"系)";
-      opts.push({val:t.type+"|f", label:fl}); }
+  (state.relTypes||[]).forEach(t=>{ const cat=t.category||"其他";
+    if(t.is_symmetric) opts.push({val:t.type+"|s", label:_relNice(t.forward_label||t.label_zh), cat});   // 配偶/兄弟姐妹/朋友/同事/合作
+    else opts.push({val:t.type+"|f", label:_relNice(t.inverse_label||t.label_zh), cat});                 // X 是当前人的 父亲/母亲/老师/上级
+  });
+  (state.relTypes||[]).forEach(t=>{ const cat=t.category||"其他";                                        // 反向:X 是当前人的 孩子/学生/下属
+    if(t.is_symmetric || t.type==="mother") return;                                                      // 父母的"孩子"合并成一项(边类型随当前人性别)
+    if(t.type==="father") opts.push({val:"child|auto", label:"孩子", cat});
+    else opts.push({val:t.type+"|i", label:_relNice(t.forward_label||t.label_zh), cat});
   });
   return opts;
+}
+function relOptionsHtml(selected){
+  const order=["亲属","社交","工作","其他"], by={};
+  relOptions().forEach(o=>(by[o.cat]=by[o.cat]||[]).push(o));
+  let h=`<option value="">— 选关系 —</option>`;
+  order.concat(Object.keys(by).filter(c=>!order.includes(c))).forEach(c=>{ if(!by[c])return;
+    h+=`<optgroup label="${esc(c)}">`+by[c].map(o=>`<option value="${esc(o.val)}"${o.val===selected?" selected":""}>${esc(o.label)}</option>`).join("")+`</optgroup>`; });
+  return h;
+}
+// 把下拉值解析成建边参数;current=当前人(详情)/此人(新建)。fromIsX=true 时边 from=X、to=当前人
+function resolveRel(rt, curSex){
+  let [type,side]=rt.split("|");
+  if(type==="child"){                       // "X 是当前人的孩子":边类型(父子/母子)取决于当前人性别
+    if(curSex!=="男"&&curSex!=="女") return { type:null, need:"sex" };  // 性别空时不静默默认 father
+    type=(curSex==="女"?"mother":"father"); side="i";
+  }
+  return { type, fromIsX: side==="f" };
 }
 // 选了初始关系时智能预填 世代/字辈/性别(复刻原 加子女/加配偶 便利)
 function initRelAuto(){
@@ -599,11 +633,14 @@ function initRelAuto(){
 
 /* ---------- 人物详情/编辑弹窗 ---------- */
 function fillFatherSelect(currentId, selected){
-  const sel=$("#f_father_id"); sel.innerHTML="";
-  const o0=el("option",null,"(无 / 见父系说明)"); o0.value=""; sel.appendChild(o0);
-  state.persons.filter(p=>p.id!==currentId).sort((a,b)=>gk(genOf(a.id))-gk(genOf(b.id))).forEach(p=>{
-    const g=genOf(p.id); const o=el("option",null,`${esc(p.name)} — ${esc(p.id)}(第${g==null?"?":g}代)`); o.value=p.id; if(p.id===selected)o.selected=true; sel.appendChild(o);
+  const list=state.persons.filter(p=>p.id!==currentId&&!p.deleted).sort((a,b)=>gk(genOf(a.id))-gk(genOf(b.id)));
+  const byGen={}; list.forEach(p=>{ const g=genOf(p.id); const k=(g==null?"未定世代":("第"+g+"代")); (byGen[k]=byGen[k]||[]).push(p); });
+  const gnum=k=>k==="未定世代"?9999:(parseInt(k.replace(/\D/g,""))||9999);
+  let h=`<option value="">(无 / 暂不连父亲)</option>`;
+  Object.keys(byGen).sort((a,b)=>gnum(a)-gnum(b)).forEach(k=>{
+    h+=`<optgroup label="${esc(k)}">`+byGen[k].map(p=>`<option value="${esc(p.id)}"${p.id===selected?" selected":""}>${esc(p.name||"(无名)")} — ${esc(p.id)}</option>`).join("")+`</optgroup>`;
   });
+  $("#f_father_id").innerHTML=h;
 }
 function openEdit(p, prefill){
   state.editing=p?p.id:null;
@@ -612,18 +649,20 @@ function openEdit(p, prefill){
   $("#modalErr").textContent="";
   const v=p||prefill||{status:"待考"};
   FORM_KEYS.forEach(k=>{ const f=$("#f_"+k); if(f) f.value=v[k]!=null?v[k]:""; });
+  $("#idField").style.display=p?"":"none";          // 新建时隐藏自动ID那格,保存后再显示
   fillFatherSelect(p?p.id:null, p?(state.fatherOf[p.id]||""):"");
   renderMedia(p?p.id:null);
-  if(p){ $("#initRelWrap").style.display="none"; }   // 编辑已有人物:关系在「关系」标签/详情管理
+  if(p){ $("#initRelWrap").style.display="none"; }   // 编辑已有人物:关系在详情页「关系网」管理
   else {
-    $("#f_rel_person").innerHTML=`<option value="">— 不连任何人 —</option>`+personOptions();
-    $("#f_rel_type").innerHTML=`<option value="">— 选关系 —</option>`+relOptions().map(o=>`<option value="${o.val}">${esc(o.label)}</option>`).join("");
+    $("#f_rel_person").innerHTML=`<option value="">— 选已有人物 —</option>`+personOptions();
+    $("#f_rel_type").innerHTML=relOptionsHtml(prefill&&prefill._relType);
     $("#f_rel_person").value=(prefill&&prefill._relTo)||"";
-    $("#f_rel_type").value=(prefill&&prefill._relType)||"";
+    $("#initRelObj").textContent="此人";
     $("#initRelWrap").style.display="";
   }
   $("#charGenHint").textContent=""; charGenAuto(); initRelAuto();
   $("#mask").classList.add("open");
+  if(!p) setTimeout(()=>{ const n=$("#f_name"); if(n) n.focus(); }, 60);
 }
 function closeModal(){ $("#mask").classList.remove("open"); state.editing=null; }
 function collectForm(){ const d={}; FORM_KEYS.forEach(k=>{ const f=$("#f_"+k); if(f) d[k]=f.value.trim(); }); return d; }  // 父亲改走关系边,不再写 father_id 列
@@ -637,6 +676,7 @@ async function reconcileFatherEdge(childId, newFatherId){
 }
 async function saveModal(){
   const d=collectForm(); const fsel=$("#f_father_id").value;
+  if(!d.name){ $("#modalErr").textContent="请先填姓名(姓名必填)"; const n=$("#f_name"); if(n) n.focus(); return; }
   try{
     if(state.editing){
       await api("PUT","/api/persons/"+encodeURIComponent(state.editing),d);
@@ -653,15 +693,19 @@ async function saveModal(){
       let extra="";
       const rp=$("#f_rel_person").value, rt=$("#f_rel_type").value;
       if($("#initRelWrap").style.display!=="none" && rp && rt){
-        const [type,side]=rt.split("|"); let from,to;
-        if(side==="f"){ from=rp; to=row.id; } else { from=row.id; to=rp; }
-        try{ await window.REL.add({from_id:from,to_id:to,type}); const tn=(state.relTypes.find(t=>t.type===type)||{}).label_zh||type; extra=" 已与「"+(((byId(rp)||{}).name)||rp)+"」建立「"+tn+"」关系。"; }
-        catch(e){ extra=" (关系建立失败:"+(/duplicate|unique/i.test(e.message)?"该关系已存在":e.message)+")"; }
+        const {type, fromIsX, need}=resolveRel(rt, d.sex||$("#f_sex").value);
+        if(!type){ extra=" (「孩子」关系需先填本人性别,未建立——可到详情页补)"; }
+        else { const from=fromIsX?rp:row.id, to=fromIsX?row.id:rp;
+          try{ await window.REL.add({from_id:from,to_id:to,type}); const tn=(state.relTypes.find(t=>t.type===type)||{}).label_zh||type; extra=" 已与「"+(((byId(rp)||{}).name)||rp)+"」建立「"+tn+"」关系。"; }
+          catch(e){ extra=" (关系建立失败:"+(/duplicate|unique/i.test(e.message)?"该关系已存在":e.message)+")"; } }
       }
-      $("#initRelWrap").style.display="none";
-      $("#modalErr").innerHTML='<span style="color:#047857">已创建,可继续上传照片;或点关闭。'+esc(extra)+'</span>';
+      $("#initRelWrap").style.display="none"; $("#idField").style.display="";
       await reloadPersons(); await refreshRelCount(); renderHeader(); renderOverview();
       fillFatherSelect(row.id, state.fatherOf[row.id]||""); renderMedia(row.id);
+      $("#modalErr").innerHTML=`<div class="callout ok"><span>✅ 已创建「${esc(row.name||row.id)}」。${esc(extra)}</span><span class="spacer"></span><button type="button" class="btn btn-sm" id="acPhoto">+ 上传照片</button><button type="button" class="btn btn-sm" id="acRel">+ 再加一位亲属</button><button type="button" class="btn btn-sm btn-primary" id="acDone">完成</button></div>`;
+      const ph=$("#acPhoto"); if(ph) ph.onclick=()=>$("#mediaFile").click();
+      const ar=$("#acRel"); if(ar) ar.onclick=()=>openAddRelative(byId(row.id));
+      const ad=$("#acDone"); if(ad) ad.onclick=closeModal;
     }
   }catch(e){ $("#modalErr").textContent="保存失败:"+e.message; }
 }
@@ -910,6 +954,13 @@ $("#gc_clear")&&($("#gc_clear").onclick=()=>{ state.graphCenter=""; state.pathA=
 $("#f_father_id").onchange=charGenAuto;
 $("#f_rel_person").onchange=initRelAuto;
 $("#f_rel_type").onchange=initRelAuto;
+$("#f_name").oninput=()=>{ const o=$("#initRelObj"); if(o) o.textContent=($("#f_name").value.trim())||"此人"; };
+// Esc 关闭最上层弹窗(此前无键盘退出)
+document.addEventListener("keydown", e=>{ if(e.key!=="Escape") return;
+  if($("#mask").classList.contains("open")) closeModal();
+  else if($("#detailMask").classList.contains("open")) closeDetail();
+  else if($("#aiMask")&&$("#aiMask").classList.contains("open")) $("#aiMask").classList.remove("open");
+  else if($("#spouseMask")&&$("#spouseMask").classList.contains("open")) $("#spouseMask").classList.remove("open"); });
 $("#logoutBtn").onclick=async()=>{ try{ await window.SBAUTH.signOut(); }catch(e){} location.reload(); };
 $("#mask").onclick=e=>{ if(e.target===$("#mask")) closeModal(); };
 $("#dCloseBtn").onclick=closeDetail;

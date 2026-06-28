@@ -382,7 +382,7 @@ async function exportGedcom(){
   const xref={}; rows.forEach((r,i)=>xref[r.id]="@I"+(i+1)+"@");
   const fams={}; rows.forEach(r=>{ const f=r.father_id; if(f&&by[f]) (fams[f]=fams[f]||[]).push(r.id); });
   const fx={}; Object.keys(fams).forEach((f,i)=>fx[f]="@F"+(i+1)+"@"); const foc={}; Object.entries(fams).forEach(([f,ks])=>ks.forEach(k=>foc[k]=f));
-  const L=["0 HEAD","1 SOUR 孙氏族谱管理系统","1 GEDC","2 VERS 5.5.1","2 FORM LINEAGE-LINKED","1 CHAR UTF-8"];
+  const L=["0 HEAD","1 SOUR 谱系(人物关系图谱)","1 GEDC","2 VERS 5.5.1","2 FORM LINEAGE-LINKED","1 CHAR UTF-8"];
   rows.forEach(r=>{ const pid=r.id; L.push("0 "+xref[pid]+" INDI");
     const nm=r.name||"", sur=nm.startsWith("孙")?"孙":"", giv=sur?nm.slice(sur.length):nm;
     L.push("1 NAME "+giv+" /"+sur+"/"); L.push("1 SEX "+(r.sex==="男"?"M":r.sex==="女"?"F":"U"));
@@ -414,10 +414,10 @@ async function exportShareHtml(){
   nodes.forEach(p=>{ if(ids.has(p.father_id)) tdef+="  "+p.father_id+" --> "+p.id+"\n"; });
   const narHtml=nar.map(n=>'<div class="card"><h3>'+esc(n.title||n.key)+'</h3><p>'+esc(n.text)+'</p></div>').join("");
   const cg=(meta.charGen||[]).join(" · "); const today=nowStr().slice(0,10);
-  const htmlDoc='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(meta.title||"孙氏族谱")+' · 分享版</title>'
+  const htmlDoc='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(meta.title||"族谱")+' · 分享版</title>'
     +'<script type="module">import m from "https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.esm.min.mjs";m.initialize({startOnLoad:true,theme:"base",themeVariables:{fontFamily:\'"PingFang SC","Noto Sans SC",sans-serif\',primaryColor:"#ecfdf5",primaryBorderColor:"#10b981",primaryTextColor:"#064e3b",lineColor:"#475569"}});<\/script>'
     +'<style>body{font-family:"PingFang SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;line-height:1.75;color:#0f172a;background:#fafaf9;max-width:920px;margin:0 auto;padding:1.5rem}h1{font-size:1.6rem}h3{color:#047857}.card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:1rem 1.3rem;margin:1rem 0}.gen{border-left:3px solid #047857;padding:.2rem 0 .2rem 1rem;margin:1rem 0}.gen p{margin:.2rem 0;color:#334155;font-size:.95rem}.tag{font-size:.7rem;border:1px solid #e2e8f0;border-radius:5px;padding:.02rem .4rem;color:#64748b}.mermaid{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:1rem;overflow:auto;text-align:center}blockquote{border-left:3px solid #047857;background:#ecfdf5;padding:.6rem 1rem;border-radius:0 6px 6px 0;color:#334155}.muted{color:#94a3b8;font-size:.8rem}</style></head><body>'
-    +'<h1>'+esc(meta.title||"孙氏族谱")+'</h1><div class="muted">'+esc(meta.lineage||"")+' · 字辈:'+esc(cg)+' · 考察:'+esc(meta.investigator||"")+' · 整理:'+esc(meta.compiler||"")+' · '+esc(meta.compiledYear||"")+'</div>'
+    +'<h1>'+esc(meta.title||"族谱")+'</h1><div class="muted">'+esc(meta.lineage||"")+' · 字辈:'+esc(cg)+' · 考察:'+esc(meta.investigator||"")+' · 整理:'+esc(meta.compiler||"")+' · '+esc(meta.compiledYear||"")+'</div>'
     +'<blockquote>'+esc(meta.migration||"")+'</blockquote><div class="card"><h3>家史</h3>'+narHtml+'</div><h3>家族树</h3><div class="mermaid">'+tdef+'</div><h3>世系(按代)</h3>'+gen
     +'<p class="muted">本页为家族分享版,在世亲属仅显示姓名,联系方式/住址等隐私信息已隐藏。生成于 '+today+'。</p></body></html>';
   download("zupu-share.html", htmlDoc, "text/html;charset=utf-8");

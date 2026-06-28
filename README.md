@@ -1,6 +1,8 @@
-# 孙氏族谱 · 云端版(Cloudflare Pages + Supabase)
+# 谱系 · 人物关系图谱(Cloudflare Pages + Supabase)
 
-前后端分离的家族族谱应用:**静态前端**(Cloudflare Pages 托管)+ **Supabase**(Postgres 存数据 / Auth 管登录 / Storage 存照片)。家人各自**邮箱+密码**登录;**editor 可编辑、viewer 只读**;未登录看不到任何数据(RLS 把门)。
+前后端分离的「人物 + 人际关系 + 关系图谱」应用(由家族族谱演化而来,仍能做家谱,但不限一族一姓):**静态前端**(Cloudflare Pages 托管)+ **Supabase**(Postgres 存数据 / Auth 管登录 / Storage 存照片)。各自**邮箱+密码**登录;**editor 可编辑、viewer 只读**;未登录看不到任何数据(RLS 把门)。
+
+架构为属性图三层:**L1 人(节点,纯个人属性)/ L2 关系(独立边表)/ L3 派生(家族/世代/字辈/树/图谱)**。
 
 > 仓库**只含代码**,不含任何家谱数据或密钥(数据在 Supabase)。`config.js` 里的 anon key 是公开安全的;**service_role 密钥永不入库**。
 
