@@ -14,7 +14,7 @@ const $ = s => document.querySelector(s);
 const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
-const APP_VERSION = "v0.8.1";
+const APP_VERSION = "v0.8.2";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -25,12 +25,16 @@ const DIRECT_LINE = new Set(["S001","S002","S004","S008","S010","S014","S019","S
 const ORIG_IMG = {p1:window.photoUrl("yuanpu/p1.jpg"),p2:window.photoUrl("yuanpu/p2.jpg"),p3:window.photoUrl("yuanpu/p3.jpg"),p4:window.photoUrl("yuanpu/p4.jpg")};
 const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media"]);
 
-const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[], relTypes:[], q:"", share:false,
+const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[], relTypes:[], relCount:{}, q:"", share:false,
                 editing:null, user:null, canEdit:false,
                 filters:{charGen:"",status:"",alive:"",kind:""} };
 
 // api(method,path,body) 由 db.js 提供(Supabase shim);此处不再定义。
 async function reloadPersons(){ state.persons = await api("GET","/api/persons"); }
+async function refreshRelCount(){
+  try{ const rels=await window.REL.all(); const m={}; rels.forEach(r=>{ m[r.from_id]=(m[r.from_id]||0)+1; m[r.to_id]=(m[r.to_id]||0)+1; }); state.relCount=m; }
+  catch(e){ state.relCount=state.relCount||{}; }
+}
 async function reloadEverything(){ await loadAll(); renderBackup(); renderLog(); }
 
 async function loadAll(){
@@ -39,6 +43,7 @@ async function loadAll(){
     api("GET","/api/verify"), api("GET","/api/transcription")
   ]);
   state.relTypes = await window.REL.types().catch(()=>[]);
+  await refreshRelCount();
   renderHeader(); renderFilters(); renderOverview(); renderHistory(); renderVerify(); renderSource();
 }
 function renderAuthBar(){       // 显示当前登录者 + 角色;viewer 隐藏所有 .edit-only 控件
@@ -277,27 +282,7 @@ function charGenAuto(){
 }
 
 /* ---------- 婚姻 ---------- */
-async function renderMarriages(pid){
-  const box=$("#marrList"); box.innerHTML="";
-  if(!pid){ $("#marrHint").textContent="保存人物后可添加婚姻。"; $("#addMarr").disabled=true; return; }
-  $("#marrHint").textContent=""; $("#addMarr").disabled=false;
-  const list=await api("GET","/api/persons/"+encodeURIComponent(pid)+"/marriages");
-  if(!list.length){ box.appendChild(el("div","hint","(暂无)")); return; }
-  list.forEach(mr=>box.appendChild(marriageRow(mr)));
-}
-function marriageRow(mr){
-  const r=el("div","subrow");
-  const f=(ph,k,w)=>{const i=el("input");i.type="text";i.placeholder=ph;i.value=mr[k]||"";i.style.width=w||"";i.dataset.k=k;return i;};
-  const sp=f("配偶","spouse"), fam=f("配偶父家/籍","spouse_family"), yr=f("婚配年","marriage_year","110px"),
-        rel=f("关系(原配/续娶/侧室)","relation","150px"), note=f("备注","note");
-  const save=el("button","btn btn-primary btn-sm","保存"); const del=el("button","btn btn-danger btn-sm","删");
-  const msg=el("span","hint");
-  save.onclick=async()=>{try{const d={};[sp,fam,yr,rel,note].forEach(i=>d[i.dataset.k]=i.value.trim());await api("PUT","/api/marriages/"+mr.id,d);msg.textContent="✓";}catch(e){msg.textContent=e.message;}};
-  del.onclick=async()=>{if(!confirm("删除该婚姻记录?"))return;await api("DELETE","/api/marriages/"+mr.id);renderMarriages(state.editing);};
-  const l1=el("div","subrow-line"); l1.appendChild(sp); l1.appendChild(fam); l1.appendChild(rel);
-  const l2=el("div","subrow-line"); l2.appendChild(yr); l2.appendChild(note); l2.appendChild(save); l2.appendChild(del); l2.appendChild(msg);
-  r.appendChild(l1); r.appendChild(l2); return r;
-}
+// 婚姻文本编辑 UI 已移除(配偶改用「夫妻」关系 + 真实人物);marriages 数据层仍保留供导出/合并。
 
 /* ---------- 相册 ---------- */
 async function renderMedia(pid){
@@ -428,12 +413,6 @@ async function openDetail(p){
   R("母", p.mother); R("配偶", p.spouse);
   if(rows.length) html+=`<div class="dgrid">${rows.join("")}</div>`;
 
-  const marr=await api("GET","/api/persons/"+encodeURIComponent(p.id)+"/marriages").catch(()=>[]);
-  if(marr.length){
-    html+=`<div class="dsec"><div class="dsec-h">婚姻</div>`+marr.map(m=>{
-      const ex=[m.relation, m.spouse_family&&("父家:"+m.spouse_family), m.marriage_year&&("婚配:"+m.marriage_year), m.note].filter(Boolean).join(" · ");
-      return `<div class="ditem"><b>${esc(m.spouse||"(配偶)")}</b>${ex?" — "+esc(ex):""}</div>`; }).join("")+`</div>`;
-  }
   const kids=childrenOf(p.id);
   if(kids.length){
     html+=`<div class="dsec"><div class="dsec-h">子女(${kids.length})</div><div class="dkids">`
@@ -451,9 +430,10 @@ async function openDetail(p){
     html+=`<div class="dsec"><div class="dsec-h">相册</div><div class="dalbum">`
       +media.map(md=>`<figure><img loading="lazy" src="${esc(window.photoUrl(md.path))}"><figcaption>${esc(md.caption||"")}</figcaption></figure>`).join("")+`</div></div>`;
   }
-  // 通用关系网(夫妻/同事/朋友/师生… + 从族谱迁来的父子)
-  const rtMap={}; (await window.REL.types().catch(()=>[])).forEach(t=>rtMap[t.type]=t);
+  // 关系网(详情页 = 关系管理中心:+加关系连已有 / 改备注 / 删;新建人物用底部 +加亲属)
+  const rtMap={}; (state.relTypes&&state.relTypes.length?state.relTypes:(await window.REL.types().catch(()=>[]))).forEach(t=>rtMap[t.type]=t);
   const rels=await window.REL.of(p.id).catch(()=>[]);
+  let rh="";
   if(rels.length){
     const byCat={};
     rels.forEach(r=>{
@@ -462,16 +442,29 @@ async function openDetail(p){
       const lab=r.directed?(fromMe?(t.forward_label||t.label_zh):(t.inverse_label||t.label_zh)):t.label_zh;
       (byCat[t.category||"其他"]=byCat[t.category||"其他"]||[]).push({r,op,lab,color:t.color});
     });
-    let rh="";
     Object.keys(byCat).forEach(cat=>{
       rh+=`<div class="hint" style="margin:.4rem 0 .1rem">${esc(cat)}</div>`;
-      byCat[cat].forEach(it=>{ rh+=`<div class="ditem"><span class="reltag" style="border-color:${esc(it.color||'#cbd5e1')};color:${esc(it.color||'#475569')}">${esc(it.lab)}</span> <a class="plink" data-pid="${esc(it.op.id)}">${esc(it.op.name||'(无名)')}</a>${state.canEdit?` <button class="btn btn-sm reldel" data-rid="${it.r.id}" title="删除此关系">✕</button>`:""}</div>`; });
+      byCat[cat].forEach(it=>{ rh+=`<div class="ditem"><span class="reltag" style="border-color:${esc(it.color||'#cbd5e1')};color:${esc(it.color||'#475569')}">${esc(it.lab)}</span> <a class="plink" data-pid="${esc(it.op.id)}">${esc(it.op.name||'(无名)')}</a>${it.r.note?`<span class="hint"> · ${esc(it.r.note)}</span>`:""}${state.canEdit?` <button class="btn btn-sm relnote" data-rid="${it.r.id}" title="改备注">改</button><button class="btn btn-sm reldel" data-rid="${it.r.id}" title="删除">✕</button>`:""}</div>`; });
     });
-    html+=`<div class="dsec"><div class="dsec-h">关系网(${rels.length})</div>${rh}</div>`;
-  }
+  } else rh=`<div class="hint">(暂无关系)</div>`;
+  const addForm = state.canEdit ? `<div class="relquick" id="relAddForm" style="display:none">本人 是 <select id="dq_to"></select> 的 <select id="dq_type"></select> <input id="dq_note" placeholder="备注(可空,如原配/续娶)"> <button class="btn btn-sm btn-primary" id="dq_add">加</button> <span class="hint" id="dq_msg"></span></div>` : "";
+  html+=`<div class="dsec"><div class="dsec-h">关系网(${rels.length})${state.canEdit?` <button class="btn btn-sm" id="relAddToggle">+ 加关系</button>`:""}</div>${addForm}${rh}</div>`;
   box.innerHTML=html;
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });
-  box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?"))return; try{ await window.REL.del(+b.dataset.rid); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
+  box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?"))return; try{ await window.REL.del(+b.dataset.rid); await refreshRelCount(); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
+  box.querySelectorAll(".relnote").forEach(b=>b.onclick=async()=>{ const cur=(rels.find(r=>String(r.id)===b.dataset.rid)||{}).note||""; const nv=prompt("关系备注(如 原配/续娶/侧室):",cur); if(nv===null)return; try{ await window.REL.update(+b.dataset.rid,{note:nv.trim()}); openDetail(byId(p.id)); }catch(e){ alert("失败:"+e.message); } });
+  const tgl=$("#relAddToggle");
+  if(tgl) tgl.onclick=()=>{ const f=$("#relAddForm"); const show=f.style.display==="none"; f.style.display=show?"":"none";
+    if(show){ $("#dq_to").innerHTML=`<option value="">选人物</option>`+personOptions(); $("#dq_type").innerHTML=`<option value="">选关系</option>`+relOptions().map(o=>`<option value="${o.val}">${esc(o.label)}</option>`).join(""); } };
+  const dqAdd=$("#dq_add");
+  if(dqAdd) dqAdd.onclick=async()=>{
+    const to=$("#dq_to").value, rt=$("#dq_type").value, note=$("#dq_note").value.trim(), msg=$("#dq_msg");
+    if(!to||!rt){ msg.textContent="选人物和关系"; return; }
+    if(to===p.id){ msg.textContent="不能和自己"; return; }
+    const [type,side]=rt.split("|"); let from,toId; if(side==="f"){ from=to; toId=p.id; } else { from=p.id; toId=to; }
+    try{ await window.REL.add({from_id:from,to_id:toId,type,note}); await refreshRelCount(); openDetail(byId(p.id)); }
+    catch(e){ msg.textContent=(/duplicate|unique/i.test(e.message)?"该关系已存在":e.message); }
+  };
   $("#detailMask").classList.add("open");
 }
 
@@ -523,7 +516,7 @@ function openEdit(p, prefill){
   const v=p||prefill||{status:"待考"};
   FORM_KEYS.forEach(k=>{ const f=$("#f_"+k); if(f) f.value=v[k]!=null?v[k]:""; });
   fillFatherSelect(p?p.id:null, v.father_id||"");
-  renderMarriages(p?p.id:null); renderMedia(p?p.id:null);
+  renderMedia(p?p.id:null);
   if(p){ $("#initRelWrap").style.display="none"; }   // 编辑已有人物:关系在「关系」标签/详情管理
   else {
     $("#f_rel_person").innerHTML=`<option value="">— 不连任何人 —</option>`+personOptions();
@@ -574,7 +567,7 @@ async function saveModal(){
       $("#initRelWrap").style.display="none";
       $("#modalErr").innerHTML='<span style="color:#047857">已创建,可继续上传照片 / 添加婚姻;或点关闭。'+esc(extra)+'</span>';
       await reloadPersons(); renderHeader(); renderOverview();
-      fillFatherSelect(row.id, d.father_id); renderMarriages(row.id); renderMedia(row.id);
+      fillFatherSelect(row.id, d.father_id); renderMedia(row.id);
     }
   }catch(e){ $("#modalErr").textContent="保存失败:"+e.message; }
 }
@@ -617,40 +610,7 @@ function personOptions(sel){
     .sort((a,b)=>(parseInt(a.gen)||0)-(parseInt(b.gen)||0)||(a.sort_order||0)-(b.sort_order||0))
     .map(p=>`<option value="${esc(p.id)}"${p.id===sel?" selected":""}>${esc(p.name||"(无名)")} — ${esc(p.id)}</option>`).join("");
 }
-async function renderRelations(){
-  const box=$("#relationsBox"); if(!box) return;
-  const types=await window.REL.types().catch(()=>[]);
-  const rels=await window.REL.all().catch(()=>[]);
-  const tmap={}; types.forEach(t=>tmap[t.type]=t);
-  const typeOpts=types.map(t=>`<option value="${esc(t.type)}">${esc(t.label_zh)}(${esc(t.category||"")})</option>`).join("");
-  const pOpts=personOptions();
-  const form = state.canEdit ? `<div class="relform">
-      <select id="rf_from" title="人A">${pOpts}</select>
-      <select id="rf_type" title="关系">${typeOpts}</select>
-      <select id="rf_to" title="人B">${pOpts}</select>
-      <input id="rf_start" placeholder="起(可空)" style="width:100px">
-      <input id="rf_note" placeholder="备注(可空)">
-      <button class="btn btn-primary btn-sm" id="rf_add">+ 添加关系</button>
-      <span class="hint" id="rf_msg"></span>
-    </div>` : `<p class="note">只读账号可查看关系;编辑需 editor 账号。</p>`;
-  const rows=rels.map(r=>{
-    const t=tmap[r.type]||{label_zh:r.type,color:"#999"}; const a=byId(r.from_id), b=byId(r.to_id); if(!a||!b) return "";
-    return `<div class="relrow"><a class="plink" data-pid="${esc(a.id)}">${esc(a.name||"(无名)")}</a>`
-      +`<span class="reltag" style="border-color:${esc(t.color)};color:${esc(t.color)}">${esc(t.label_zh)}</span>${r.directed?"→":"—"}`
-      +`<a class="plink" data-pid="${esc(b.id)}">${esc(b.name||"(无名)")}</a>`
-      +(r.start_date?`<span class="hint"> · ${esc(r.start_date)}</span>`:"")+(r.note?`<span class="hint"> · ${esc(r.note)}</span>`:"")
-      +(state.canEdit?` <button class="btn btn-sm reldel" data-rid="${r.id}">删除</button>`:"")+`</div>`;
-  }).join("");
-  box.innerHTML=form+`<div class="hint" style="margin:.6rem 0">共 ${rels.length} 条关系(含从族谱迁来的父子)</div>`+(rows||"<p class='hint'>还没有关系。</p>");
-  box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });
-  box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?"))return; try{ await window.REL.del(+b.dataset.rid); renderRelations(); }catch(e){ alert(e.message);} });
-  if(state.canEdit) $("#rf_add").onclick=async()=>{
-    const msg=$("#rf_msg");
-    try{ await window.REL.add({from_id:$("#rf_from").value,to_id:$("#rf_to").value,type:$("#rf_type").value,start_date:$("#rf_start").value.trim(),note:$("#rf_note").value.trim()});
-      renderRelations(); }
-    catch(e){ msg.textContent="失败:"+e.message; }
-  };
-}
+// 「关系」标签已移除;关系的增/删/改收归到人物详情页(见 openDetail)。personOptions/relOptions 仍复用。
 
 /* ---------- 关系图谱(ECharts,懒加载 CDN)---------- */
 let _echarts=null, _graphChart=null;
@@ -686,7 +646,7 @@ window.addEventListener("resize", ()=>{ const v=document.getElementById("view-gr
 /* ---------- 名册:全部人员表格 · 列可配置 · 可排序 · 点行编辑 ---------- */
 const ROSTER_COLS = [
   {k:"name",label:"姓名"},{k:"kind",label:"本族/外部"},{k:"gen",label:"世代"},{k:"char_gen",label:"字辈"},
-  {k:"sex",label:"性别"},{k:"alive",label:"在世"},{k:"rank",label:"行第"},{k:"relation_type",label:"亲属关系"},
+  {k:"sex",label:"性别"},{k:"alive",label:"在世"},{k:"rel_count",label:"关系数"},{k:"rank",label:"行第"},{k:"relation_type",label:"亲属关系"},
   {k:"birth",label:"生年"},{k:"birth_lunar",label:"农历生"},{k:"birth_time",label:"出生时间"},{k:"death",label:"卒年"},
   {k:"birth_place",label:"出生地"},{k:"occupation",label:"学历/职业"},{k:"residence",label:"居地"},{k:"burial",label:"葬地"},
   {k:"mother",label:"母"},{k:"spouse",label:"配偶"},{k:"contact",label:"联系方式"},{k:"address",label:"住址"},
@@ -703,7 +663,7 @@ function renderRoster(){
   const kind=$("#rosterKind") ? $("#rosterKind").value : "";
   if(kind) list=list.filter(p=>(p.kind||"本族")===kind);
   const sk=_rosterSort.k, dir=_rosterSort.dir;
-  list=list.slice().sort((a,b)=>{ let va,vb; if(sk==="gen"){va=gk(a.gen);vb=gk(b.gen);} else {va=(a[sk]??"")+"";vb=(b[sk]??"")+"";}
+  list=list.slice().sort((a,b)=>{ let va,vb; if(sk==="gen"){va=gk(a.gen);vb=gk(b.gen);} else if(sk==="rel_count"){va=state.relCount[a.id]||0;vb=state.relCount[b.id]||0;} else {va=(a[sk]??"")+"";vb=(b[sk]??"")+"";}
     return va<vb?-dir:va>vb?dir:0; });
   const picker=`<details class="colpick"${_colpickOpen?" open":""}><summary>列设置(${colset.size} 列)</summary><div class="colgrid">`
     + ROSTER_COLS.map(c=>`<label><input type="checkbox" data-col="${c.k}"${colset.has(c.k)?" checked":""}> ${esc(c.label)}</label>`).join("") + `</div></details>`;
@@ -711,7 +671,7 @@ function renderRoster(){
     + `<select id="rosterKind"><option value="">全部</option><option value="本族"${kind==="本族"?" selected":""}>本族</option><option value="外部"${kind==="外部"?" selected":""}>外部</option></select>`
     + `<span class="hint">${list.length} 人 · 点一行${state.canEdit?"编辑":"看详情"}</span></div>`;
   const thead="<tr>"+orderedCols.map(c=>`<th data-sk="${c.k}">${esc(c.label)}${sk===c.k?(dir>0?" ▲":" ▼"):""}</th>`).join("")+"</tr>";
-  const fmt=(p,k)=> k==="kind"?(p.kind||"本族"):(p[k]==null?"":p[k]);
+  const fmt=(p,k)=> k==="kind"?(p.kind||"本族"):(k==="rel_count"?(state.relCount[p.id]||0):(p[k]==null?"":p[k]));
   const rows=list.map(p=>`<tr data-pid="${esc(p.id)}">`+orderedCols.map(c=>`<td>${esc(String(fmt(p,c.k)))}</td>`).join("")+`</tr>`).join("");
   box.innerHTML=bar+`<div class="rostertable"><table class="roster"><thead>${thead}</thead><tbody>${rows||""}</tbody></table></div>`;
   const dt=box.querySelector(".colpick"); if(dt) dt.ontoggle=e=>{ _colpickOpen=e.target.open; };
@@ -789,7 +749,6 @@ function switchView(name){
   $("#view-"+name).classList.add("active");
   if(location.hash!=="#"+name) location.hash=name;
   if(name==="tree") renderTree();
-  if(name==="relations") renderRelations();
   if(name==="graph") renderGraph();
   if(name==="roster") renderRoster();
   if(name==="trash") renderTrash();
@@ -814,12 +773,6 @@ $("#dCloseBtn").onclick=closeDetail;
 $("#dEditBtn").onclick=()=>{ const p=byId(state.detailing); closeDetail(); if(p) openEdit(p); };
 $("#dAddRelative").onclick=()=>openAddRelative(byId(state.detailing));
 $("#detailMask").onclick=e=>{ if(e.target===$("#detailMask")) closeDetail(); };
-$("#addMarr").onclick=async()=>{
-  if(!state.editing){alert("请先保存人物");return;}
-  if(!state.canEdit){ $("#marrHint").textContent="只读账号无权编辑"; return; }
-  try{ await api("POST","/api/persons/"+encodeURIComponent(state.editing)+"/marriages",{spouse:"",relation:""}); renderMarriages(state.editing); }
-  catch(e){ $("#marrHint").textContent="添加失败:"+e.message; }
-};
 $("#addPhoto").onclick=()=>{ if(!state.editing){alert("请先保存人物");return;} $("#mediaFile").click(); };
 $("#mediaFile").onchange=e=>{ if(e.target.files[0]) uploadMedia(e.target.files[0]); e.target.value=""; };
 $("#addVerify").onclick=async()=>{
