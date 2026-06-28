@@ -230,10 +230,31 @@
   </div>
 </div>
 
+<!-- 配偶整理(原始记载 → 真实配偶人物 + 夫妻关系) -->
+<div class="mask" id="spouseMask">
+  <div class="modal" style="width:min(760px,100%)" role="dialog" aria-modal="true">
+    <h2>整理配偶为人物 · <span id="spTitle"></span></h2>
+    <div class="sp-orig">原始记载:<b id="spOrig"></b></div>
+    <p class="hint">每行 = 一位配偶。核对/修改后点「确认转换」:为每位配偶<b>新建人物</b>(或并入已有)并连一条「夫妻」关系;<b>全部配偶都连好后才清空原文</b>(原文进操作历史,可撤销还原)。同名会提示,可选「用已有」或「仍新建」。</p>
+    <div id="spRows"></div>
+    <div class="modal-foot" style="margin:.4rem 0">
+      <button class="btn btn-sm" id="spAddRow">+ 手动加一位配偶</button>
+      <span class="hint" id="spParseMsg"></span>
+    </div>
+    <div class="err" id="spErr"></div>
+    <div class="modal-foot sticky">
+      <span class="hint" id="spProgress"></span>
+      <span class="spacer"></span>
+      <button class="btn" id="spClose">关闭</button>
+      <button class="btn btn-primary" id="spConfirm">确认转换</button>
+    </div>
+  </div>
+</div>
+
 <!-- ?v= 随版本递增,确保部署后浏览器加载最新代码(改版本时同步改这里) -->
-<script src="config.js?v=0.11.0"></script>
-<script type="module" src="db.js?v=0.11.0"></script>
-<script type="module" src="app.js?v=0.11.0"></script>
-<script type="module" src="calendar.js?v=0.11.0"></script>
+<script src="config.js?v=0.12.0"></script>
+<script type="module" src="db.js?v=0.12.0"></script>
+<script type="module" src="app.js?v=0.12.0"></script>
+<script type="module" src="calendar.js?v=0.12.0"></script>
 </body>
 </html>
