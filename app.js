@@ -14,7 +14,7 @@ const $ = s => document.querySelector(s);
 const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
-const APP_VERSION = "v0.9.0";
+const APP_VERSION = "v0.9.1";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -27,6 +27,7 @@ const UNDOABLE = new Set(["create:person","update:person","delete:person","purge
 
 const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[], relTypes:[], relCount:{}, q:"", share:false,
                 editing:null, user:null, canEdit:false, lineage:"",
+                graphCenter:"", graphHops:2, pathA:"", pathB:"",
                 fatherOf:{}, motherOf:{}, childrenMap:{}, spouseOf:{}, _genCache:{}, _lineageCache:{}, lineages:null,
                 filters:{charGen:"",status:"",alive:"",kind:""} };
 
@@ -500,9 +501,10 @@ async function openDetail(p){
     });
   } else rh=`<div class="hint">(暂无关系)</div>`;
   const addForm = state.canEdit ? `<div class="relquick" id="relAddForm" style="display:none">本人 是 <select id="dq_to"></select> 的 <select id="dq_type"></select> <input id="dq_note" placeholder="备注(可空,如原配/续娶)"> <button class="btn btn-sm btn-primary" id="dq_add">加</button> <span class="hint" id="dq_msg"></span></div>` : "";
-  html+=`<div class="dsec"><div class="dsec-h">关系网(${rels.length})${state.canEdit?` <button class="btn btn-sm" id="relAddToggle">+ 加关系</button>`:""}</div>${addForm}${rh}</div>`;
+  html+=`<div class="dsec"><div class="dsec-h">关系网(${rels.length}) <button class="btn btn-sm" id="relEgoBtn">🎯 关系圈</button>${state.canEdit?` <button class="btn btn-sm" id="relAddToggle">+ 加关系</button>`:""}</div>${addForm}${rh}</div>`;
   box.innerHTML=html;
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });
+  { const eb=$("#relEgoBtn"); if(eb) eb.onclick=()=>{ state.graphCenter=p.id; state.pathA=""; state.pathB=""; closeDetail(); switchView("graph"); }; }
   box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?"))return; try{ await window.REL.del(+b.dataset.rid); await refreshRelCount(); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
   box.querySelectorAll(".relnote").forEach(b=>b.onclick=async()=>{ const cur=(rels.find(r=>String(r.id)===b.dataset.rid)||{}).note||""; const nv=prompt("关系备注(如 原配/续娶/侧室):",cur); if(nv===null)return; try{ await window.REL.update(+b.dataset.rid,{note:nv.trim()}); openDetail(byId(p.id)); }catch(e){ alert("失败:"+e.message); } });
   const tgl=$("#relAddToggle");
@@ -675,6 +677,18 @@ function personOptions(sel){
 /* ---------- 关系图谱(ECharts,懒加载 CDN)---------- */
 let _echarts=null, _graphChart=null;
 async function getECharts(){ if(!_echarts) _echarts=await import("https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.esm.min.mjs"); return _echarts; }
+// 无向 BFS 最短路径(连通性,用于"两人怎么连")
+function bfsPath(adj,a,b){
+  const prev={}; prev[a]=null; const q=[a];
+  while(q.length){ const cur=q.shift(); if(cur===b){ const path=[]; let x=b; while(x!=null){ path.unshift(x); x=prev[x]; } return path; }
+    (adj[cur]||[]).forEach(n=>{ if(!(n in prev)){ prev[n]=cur; q.push(n); } }); }
+  return null;
+}
+function fillGraphControls(){
+  const opts=`<option value="">—</option>`+personOptions();
+  [["gc_center",state.graphCenter],["gc_pathA",state.pathA],["gc_pathB",state.pathB]].forEach(([id,val])=>{ const s=$("#"+id); if(s){ s.innerHTML=opts; s.value=val||""; } });
+  const hs=$("#gc_hops"); if(hs) hs.value=String(state.graphHops||2);
+}
 async function renderGraph(){
   const box=$("#graphBox"); if(!box) return;
   box.innerHTML="<p class='note' style='padding:1rem'>加载关系图谱…</p>";
@@ -683,21 +697,53 @@ async function renderGraph(){
   catch(e){ box.innerHTML="<p style='padding:1rem;color:#b91c1c'>图谱加载失败:"+esc(e.message)+"</p>"; return; }
   const tmap={}; types.forEach(t=>tmap[t.type]=t);
   const persons=state.persons.filter(p=>!p.deleted); const idset=new Set(persons.map(p=>p.id));
-  const deg={}; rels.forEach(r=>{ if(idset.has(r.from_id))deg[r.from_id]=(deg[r.from_id]||0)+1; if(idset.has(r.to_id))deg[r.to_id]=(deg[r.to_id]||0)+1; });
-  const nodes=persons.map(p=>({ id:p.id, name:p.name||"(无名)", symbolSize:Math.min(48,18+(deg[p.id]||0)*4),
-    value:(p.char_gen&&p.char_gen!=="—"?p.char_gen+"字辈·":"")+"第"+genStr(p.id)+"代", itemStyle:{color:p.alive==="是"?"#10b981":"#64748b"} }));
-  const links=rels.filter(r=>idset.has(r.from_id)&&idset.has(r.to_id)).map(r=>{ const t=tmap[r.type]||{};
+  const edges=rels.filter(r=>idset.has(r.from_id)&&idset.has(r.to_id));
+  const adj={}, edgeOf={};
+  edges.forEach(r=>{ (adj[r.from_id]=adj[r.from_id]||[]).push(r.to_id); (adj[r.to_id]=adj[r.to_id]||[]).push(r.from_id); edgeOf[r.from_id+"|"+r.to_id]=r; edgeOf[r.to_id+"|"+r.from_id]=r; });
+  fillGraphControls();
+  // 局部圈(以中心人物 N 跳)
+  let visible=null;
+  if(state.graphCenter && idset.has(state.graphCenter)){
+    visible=new Set([state.graphCenter]); let fr=[state.graphCenter];
+    for(let h=0;h<(state.graphHops||2);h++){ const nx=[]; fr.forEach(id=>(adj[id]||[]).forEach(n=>{ if(!visible.has(n)){visible.add(n);nx.push(n);} })); fr=nx; }
+  }
+  // 最短关系链
+  let pathSet=null, pathEdge=null, pathText="";
+  if(state.pathA && state.pathB && state.pathA!==state.pathB && idset.has(state.pathA) && idset.has(state.pathB)){
+    const path=bfsPath(adj,state.pathA,state.pathB);
+    if(path){ pathSet=new Set(path); pathEdge=new Set(); const segs=[];
+      for(let i=0;i<path.length-1;i++){ pathEdge.add(path[i]+"|"+path[i+1]); pathEdge.add(path[i+1]+"|"+path[i]);
+        const r=edgeOf[path[i]+"|"+path[i+1]]||{}, t=tmap[r.type]||{};
+        segs.push(esc((byId(path[i])||{}).name||path[i])+' <span style="color:#f59e0b">—'+esc(t.label_zh||r.type||"")+'→</span>'); }
+      segs.push(esc((byId(path[path.length-1])||{}).name||""));
+      pathText="最短关系链("+(path.length-1)+"步):"+segs.join(" ");
+      if(visible) path.forEach(id=>visible.add(id));
+    } else pathText="「"+esc((byId(state.pathA)||{}).name||"")+"」与「"+esc((byId(state.pathB)||{}).name||"")+"」之间无可达关系路径。";
+  }
+  const pt=$("#graphPathText"); if(pt) pt.innerHTML=pathText;
+  const show = visible || idset;
+  const deg={}; edges.forEach(r=>{ deg[r.from_id]=(deg[r.from_id]||0)+1; deg[r.to_id]=(deg[r.to_id]||0)+1; });
+  const dimNode = id => pathSet && !pathSet.has(id);
+  const nodes=persons.filter(p=>show===idset||show.has(p.id)).map(p=>{
+    const onPath=!!(pathSet&&pathSet.has(p.id)), isCenter=p.id===state.graphCenter;
+    return { id:p.id, name:p.name||"(无名)", symbolSize:(onPath||isCenter?12:0)+Math.min(44,16+(deg[p.id]||0)*4),
+      value:(p.char_gen&&p.char_gen!=="—"?p.char_gen+"字辈·":"")+"第"+genStr(p.id)+"代",
+      itemStyle:{ color:p.alive==="是"?"#10b981":"#64748b", opacity:dimNode(p.id)?0.18:1, borderColor:isCenter?"#dc2626":(onPath?"#f59e0b":"transparent"), borderWidth:(isCenter||onPath)?3:0 },
+      label:{ show: !pathSet || onPath } };
+  });
+  const nodeIds=new Set(nodes.map(n=>n.id));
+  const links=edges.filter(r=>nodeIds.has(r.from_id)&&nodeIds.has(r.to_id)).map(r=>{ const t=tmap[r.type]||{}, onP=!!(pathEdge&&pathEdge.has(r.from_id+"|"+r.to_id));
     return { source:r.from_id, target:r.to_id, value:t.label_zh||r.type,
-      lineStyle:{color:t.color||"#94a3b8",width:1.5,curveness:0.06,opacity:0.75}, symbol:r.directed?["none","arrow"]:["none","none"], symbolSize:7 }; });
-  const legend=$("#graphLegend"); if(legend) legend.innerHTML=`<span class="leg"><i style="background:#10b981;width:10px;height:10px;border-radius:50%"></i>在世</span><span class="leg"><i style="background:#64748b;width:10px;height:10px;border-radius:50%"></i>已故</span>`+types.map(t=>`<span class="leg"><i style="background:${esc(t.color)}"></i>${esc(t.label_zh)}</span>`).join("");
-  box.innerHTML=""; box.style.height="72vh";
+      lineStyle:{color:onP?"#f59e0b":(t.color||"#94a3b8"),width:onP?4:1.5,curveness:0.06,opacity:pathSet?(onP?1:0.1):0.72}, symbol:r.directed?["none","arrow"]:["none","none"], symbolSize:onP?10:7 }; });
+  const legend=$("#graphLegend"); if(legend) legend.innerHTML=`<span class="leg"><i style="background:#10b981;width:10px;height:10px;border-radius:50%"></i>在世</span><span class="leg"><i style="background:#64748b;width:10px;height:10px;border-radius:50%"></i>已故</span>`+(state.graphCenter?`<span class="leg" style="color:#dc2626">● 中心(${esc((byId(state.graphCenter)||{}).name||"")}/${state.graphHops}跳)</span>`:"")+types.map(t=>`<span class="leg"><i style="background:${esc(t.color)}"></i>${esc(t.label_zh)}</span>`).join("");
+  box.innerHTML=""; box.style.height="66vh";
   if(_graphChart){ try{_graphChart.dispose();}catch(e){} }
   _graphChart=echarts.init(box);
   _graphChart.setOption({
     tooltip:{ formatter:pp=> pp.dataType==="edge" ? esc(pp.data.value) : "<b>"+esc(pp.data.name)+"</b><br>"+esc(pp.data.value) },
     series:[{ type:"graph", layout:"force", roam:true, draggable:true, force:{repulsion:230,edgeLength:95,gravity:0.08},
       label:{show:true,position:"right",fontSize:11,fontFamily:'"PingFang SC","Noto Sans SC",sans-serif',color:"#0f172a"},
-      emphasis:{focus:"adjacency",lineStyle:{width:3}}, lineStyle:{color:"#94a3b8"}, data:nodes, links:links }]
+      emphasis:{focus:"adjacency",lineStyle:{width:4}}, lineStyle:{color:"#94a3b8"}, data:nodes, links:links }]
   });
   _graphChart.on("click", pp=>{ if(pp.dataType==="node"){ const t=byId(pp.data.id); if(t) openDetail(t); } });
 }
@@ -823,6 +869,11 @@ $("#saveBtn").onclick=saveModal;
 $("#delBtn").onclick=delModal;
 $("#cancelBtn").onclick=closeModal;
 $("#reTree").onclick=renderTree;
+$("#gc_center")&&($("#gc_center").onchange=e=>{ state.graphCenter=e.target.value; renderGraph(); });
+$("#gc_hops")&&($("#gc_hops").onchange=e=>{ state.graphHops=+e.target.value||2; renderGraph(); });
+$("#gc_pathA")&&($("#gc_pathA").onchange=e=>{ state.pathA=e.target.value; renderGraph(); });
+$("#gc_pathB")&&($("#gc_pathB").onchange=e=>{ state.pathB=e.target.value; renderGraph(); });
+$("#gc_clear")&&($("#gc_clear").onclick=()=>{ state.graphCenter=""; state.pathA=""; state.pathB=""; renderGraph(); });
 $("#f_father_id").onchange=charGenAuto;
 $("#f_kind").onchange=applyKindUI;
 $("#f_rel_person").onchange=initRelAuto;
