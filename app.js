@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.26.4";
+const APP_VERSION = "v0.27.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1347,6 +1347,23 @@ const IMPORT_FIELDS=[
   {k:"contact",label:"联系方式"},{k:"address",label:"住址"},{k:"deeds",label:"事迹"},{k:"note",label:"备注"},{k:"source",label:"来源"}
 ];
 const IMPORT_HMAP={"姓名":"name","名字":"name","name":"name","性别":"sex","sex":"sex","出生":"birth","生年":"birth","出生日期":"birth","出生年月":"birth","生日":"birth","birth":"birth","农历":"birth_lunar","农历生辰":"birth_lunar","生辰":"birth_lunar","出生时间":"birth_time","时辰":"birth_time","出生地":"birth_place","籍贯":"birth_place","卒":"death","卒年":"death","享年":"death","在世":"alive","字辈":"char_gen","派字":"char_gen","字号":"alias","别名":"alias","学历":"occupation","职业":"occupation","occupation":"occupation","公司":"company","单位":"company","company":"company","工作单位":"company","居地":"residence","居住地":"residence","住址":"address","地址":"address","现住址":"address","联系方式":"contact","电话":"contact","手机":"contact","备注":"note","note":"note","来源":"source","事迹":"deeds","简历":"deeds"};
+// 表头常见繁体字→简体(只为匹配关键词,不改写入值)
+const _T2S={別:"别",號:"号",碼:"码",證:"证",類:"类",齡:"龄",歲:"岁",稱:"称",聯:"联",係:"系",話:"话",機:"机",職:"职",業:"业",曆:"历",歷:"历",鄉:"乡",貫:"贯",學:"学",單:"单",員:"员",傳:"传",備:"备",註:"注",來:"来",蹟:"迹",績:"绩",親:"亲",戶:"户",齒:"齿",鄰:"邻",鎮:"镇",縣:"县",點:"点",時:"时",歿:"殁",齡:"龄",藉:"籍",貫:"贯",檔:"档",編:"编",齡:"龄"};
+const _simp = s => String(s||"").replace(/[一-鿿]/g,c=>_T2S[c]||c);
+// 用关键词表猜列→字段:先繁转简、去空白小写,精确命中→子串包含(长关键词优先,避免"出生地"被"出生"抢走)
+const _HMAP_KEYS = Object.keys(IMPORT_HMAP).sort((a,b)=>b.length-a.length);
+function guessField(header){
+  const h=_simp(header).trim().toLowerCase().replace(/\s+/g,""); if(!h) return "";
+  if(IMPORT_HMAP[h]) return IMPORT_HMAP[h];
+  for(const k of _HMAP_KEYS){ if(k.length>=2 && h.includes(_simp(k))) return IMPORT_HMAP[k]; }
+  return "";
+}
+// AI 推荐列映射(人工审核);走 CF 代理 DeepSeek,editor 鉴权,失败抛错由调用方提示
+async function aiMapColumns(headers, sample){
+  const session=await window.SBAUTH.getSession(); const token=session&&session.access_token;
+  const r=await fetch("/api/map-columns",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({ headers, sample, fields:IMPORT_FIELDS.map(f=>({k:f.k,label:f.label})) }) });
+  const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j.mapping||{};
+}
 let _imp=null;
 function parseDelimited(text,delim){
   const rows=[]; let row=[],cell="",inQ=false;
@@ -1389,16 +1406,24 @@ function renderImporter(){
     $("#impFile").onchange=async e=>{ const f=e.target.files[0]; if(!f) return; $("#impErr").textContent="解析中…";
       try{ const {headers,rows,note}=await parseTable(f); if(!headers.length||!rows.length){ $("#impErr").textContent="没读到数据(需表头+至少1行数据)"; return; } _imp.note=note||"";
         _imp.headers=headers; _imp.rows=rows; _imp.mapping={};
-        headers.forEach((h,i)=>{ const key=(h||"").trim(); _imp.mapping[i]=IMPORT_HMAP[key]||IMPORT_HMAP[key.toLowerCase()]||""; });
+        const _used=new Set();   // 同一字段不重复映射(第二个同义列降为忽略,人工再调)
+        headers.forEach((h,i)=>{ let k=guessField(h); if(k&&_used.has(k)) k=""; _imp.mapping[i]=k; if(k)_used.add(k); });
         _imp.step=2; renderImporter();
       }catch(err){ $("#impErr").textContent="解析失败:"+err.message; } };
   } else if(_imp.step===2){
     const rowsHtml=_imp.headers.map((h,i)=>`<div class="mergerow"><b style="min-width:7em;display:inline-block">${esc(h||"(空列"+(i+1)+")")}</b> → <select class="impmap" data-i="${i}"><option value="">忽略</option>${IMPORT_FIELDS.map(f=>`<option value="${f.k}"${_imp.mapping[i]===f.k?" selected":""}>${esc(f.label)}</option>`).join("")}</select> <span class="hint">例:${esc(String((_imp.rows[0]&&_imp.rows[0][i])||"").slice(0,18))}</span></div>`).join("");
     mask.innerHTML=`<div class="modal" style="width:min(640px,100%)"><h2>列映射(${_imp.rows.length} 行)</h2>${_imp.note?`<p class="hint" style="color:#b45309">${esc(_imp.note)}</p>`:""}
-      <p class="hint">把每列对到人物字段(已自动猜,核对)。<b>姓名必须映射</b>;选「忽略」的列不导入。</p>
-      <div style="max-height:52vh;overflow:auto">${rowsHtml}</div><div class="err" id="impErr"></div>
+      <p class="hint">把每列对到人物字段(已自动猜,核对)。<b>姓名必须映射</b>;选「忽略」的列不导入。猜不准可点 🤖 让 AI 推荐,再人工核对。</p>
+      <div style="margin:.2rem 0 .5rem"><button class="btn btn-sm" id="impAimap">🤖 AI 推荐映射</button> <span class="hint" id="impAimapMsg"></span></div>
+      <div style="max-height:48vh;overflow:auto">${rowsHtml}</div><div class="err" id="impErr"></div>
       <div class="modal-foot"><button class="btn" id="impBack">上一步</button><span class="spacer"></span><button class="btn btn-primary" id="impNext">下一步:匹配预览</button></div></div>`;
     mask.querySelectorAll(".impmap").forEach(s=>s.onchange=()=>{ _imp.mapping[+s.dataset.i]=s.value; });
+    $("#impAimap").onclick=async()=>{ const b=$("#impAimap"), m=$("#impAimapMsg"); b.disabled=true; b.textContent="AI 推荐中…"; if(m)m.textContent="";
+      try{ const sample=_imp.headers.map((h,i)=>String((_imp.rows[0]&&_imp.rows[0][i])||"").slice(0,40));
+        const mp=await aiMapColumns(_imp.headers, sample); let n=0;
+        _imp.headers.forEach((h,i)=>{ const k=mp[String(i)]; if(k!==undefined && (k===""||IMPORT_FIELDS.some(f=>f.k===k))){ if(_imp.mapping[i]!==k)n++; _imp.mapping[i]=k; } });
+        renderImporter(); const m2=$("#impAimapMsg"); if(m2)m2.textContent=`AI 已推荐(改动 ${n} 列),请核对`;
+      }catch(e){ b.disabled=false; b.textContent="🤖 AI 推荐映射"; const m3=$("#impAimapMsg"); if(m3){ m3.style.color="#dc2626"; m3.textContent="AI 推荐失败:"+e.message; } } };
     $("#impBack").onclick=()=>{ _imp.step=1; renderImporter(); };
     $("#impNext").onclick=async()=>{ if(!Object.values(_imp.mapping).includes("name")){ $("#impErr").textContent="请把某列映射为「姓名」"; return; } $("#impErr").textContent="匹配 + 识别日期中(含农历/时辰)…"; await buildImportPreview(); _imp.step=3; renderImporter(); };
   } else { renderImportPreview(); }
