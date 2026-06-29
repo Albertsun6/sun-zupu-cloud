@@ -7,15 +7,17 @@
 const SB_URL  = "https://ktalsyrxueabdisrszde.supabase.co";
 const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0YWxzeXJ4dWVhYmRpc3JzemRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc3MjYsImV4cCI6MjA5ODEwMzcyNn0.Chj8Zdn9BbK7PbpiEoa7iKDmuq_fSab019vL5X5vtPc";
 
-const SYSTEM = `你是中文日期规范化助手。把每个输入字符串规范成【公历】ISO 日期,年月日可以不全:
-- 完整 → "YYYY-MM-DD";只能确定年月 → "YYYY-MM";只能确定年 → "YYYY";完全无法识别 → value 留空 ""、ok=false。
-- 农历日期:若给了农历月日但无法可靠换算成公历具体日,就只输出能确定的年(YYYY);能可靠换算才给月日。
-- 帝王年号/民国纪年(如"光绪三年""民国卅八年""康熙十年"):换算成公历年(通常只给 YYYY)。
-- 模糊(如"约1900""1900年前后""1992/93""1948左右"):取最可能的公历年,只给 YYYY,note 写"约"。
-- 已是干净数字日期的也照常规范(如"1996/6/26"→"1996-06-26")。
-- 绝不编造:拿不准月/日就不要给月/日;整体拿不准就 ok=false。
-只输出一个 JSON 对象,不要解释、不要 markdown:
-{"results":[{"input":"原文","value":"YYYY-MM-DD|YYYY-MM|YYYY|","ok":true,"note":"换算依据,可空"}]}
+const SYSTEM = `你是中文出生日期/时辰解析助手。把每个输入解析成结构化信息(年月日时,可缺):
+每条输出 4 个字段:
+- value: 【公历】ISO 日期。完整→"YYYY-MM-DD";只确定年月→"YYYY-MM";只确定年→"YYYY";无法确定→""。
+    · 农历输入(如"六月初五""腊月初九")请尽量换算成公历日期;若换算没把握就只给能确定的公历年(YYYY)。
+    · 帝王年号/民国纪年("光绪三年""民国卅八年")换算成公历年。生肖("属羊")可辅助定年。
+    · 模糊("约1900""1992/93")取最可能公历年,note 写"约"。
+- lunar: 农历生辰原文/标准化(如"农历六月初五""腊月初九");输入里没有农历成分就 ""。
+- time: 出生时辰/钟点。"早9时"→"09:00","下午3点"→"15:00","子时"→"子时","巳时"→"巳时";没有就 ""。
+- ok: 至少能确定公历年=true,否则 false。
+绝不编造:拿不准的就留空对应字段。只输出一个 JSON,不要解释、不要 markdown:
+{"results":[{"input":"原文","value":"YYYY-MM-DD|YYYY-MM|YYYY|","lunar":"","time":"","ok":true,"note":""}]}
 results 顺序与输入数组一致、长度一致。`;
 
 function json(o, status){ return new Response(JSON.stringify(o), { status: status||200, headers: { "content-type": "application/json; charset=utf-8" } }); }
@@ -53,8 +55,8 @@ export async function onRequestPost({ request, env }){
     // 按 input 对齐(防 AI 漏条/乱序);未命中的标 ok=false
     const map = {}; parsed.results.forEach(r=>{ if(r&&typeof r.input==="string") map[r.input.trim()] = r; });
     const results = dates.map(d=>{ const r=map[d]||{}; const v=(r.value||"").trim();
-      const ok = (r.ok===true) && /^\d{3,4}(-\d{2}(-\d{2})?)?$/.test(v);
-      return { input:d, value: ok?v:"", ok, note:(r.note||"") }; });
+      const valOk = /^\d{3,4}(-\d{2}(-\d{2})?)?$/.test(v);
+      return { input:d, value: valOk?v:"", lunar:(r.lunar||"").trim(), time:(r.time||"").trim(), ok:(r.ok===true&&valOk), note:(r.note||"") }; });
     return json({ results, model });
   }catch(e){ return json({ error:String((e&&e.message)||e) }, 500); }
 }

@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.20.1";
+const APP_VERSION = "v0.20.2";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1192,12 +1192,12 @@ function renderRoster(){
 
 /* ---------- 表格导入(CSV/Excel)+ reconcile:按 姓名+出生年 匹配,逐条 合并/覆盖/跳过/新建 ---------- */
 const IMPORT_FIELDS=[
-  {k:"name",label:"姓名"},{k:"sex",label:"性别"},{k:"birth",label:"出生日期"},{k:"death",label:"卒年"},
+  {k:"name",label:"姓名"},{k:"sex",label:"性别"},{k:"birth",label:"出生日期"},{k:"birth_lunar",label:"农历生辰"},{k:"birth_time",label:"出生时间"},{k:"death",label:"卒年"},
   {k:"alive",label:"在世"},{k:"char_gen",label:"字辈"},{k:"alias",label:"字号"},{k:"birth_place",label:"出生地"},
   {k:"occupation",label:"学历/职业"},{k:"company",label:"公司"},{k:"residence",label:"居地"},
   {k:"contact",label:"联系方式"},{k:"address",label:"住址"},{k:"deeds",label:"事迹"},{k:"note",label:"备注"},{k:"source",label:"来源"}
 ];
-const IMPORT_HMAP={"姓名":"name","名字":"name","name":"name","性别":"sex","sex":"sex","出生":"birth","生年":"birth","出生日期":"birth","出生年月":"birth","生日":"birth","birth":"birth","出生地":"birth_place","籍贯":"birth_place","卒":"death","卒年":"death","享年":"death","在世":"alive","字辈":"char_gen","派字":"char_gen","字号":"alias","别名":"alias","学历":"occupation","职业":"occupation","occupation":"occupation","公司":"company","单位":"company","company":"company","工作单位":"company","居地":"residence","居住地":"residence","住址":"address","地址":"address","现住址":"address","联系方式":"contact","电话":"contact","手机":"contact","备注":"note","note":"note","来源":"source","事迹":"deeds","简历":"deeds"};
+const IMPORT_HMAP={"姓名":"name","名字":"name","name":"name","性别":"sex","sex":"sex","出生":"birth","生年":"birth","出生日期":"birth","出生年月":"birth","生日":"birth","birth":"birth","农历":"birth_lunar","农历生辰":"birth_lunar","生辰":"birth_lunar","出生时间":"birth_time","时辰":"birth_time","出生地":"birth_place","籍贯":"birth_place","卒":"death","卒年":"death","享年":"death","在世":"alive","字辈":"char_gen","派字":"char_gen","字号":"alias","别名":"alias","学历":"occupation","职业":"occupation","occupation":"occupation","公司":"company","单位":"company","company":"company","工作单位":"company","居地":"residence","居住地":"residence","住址":"address","地址":"address","现住址":"address","联系方式":"contact","电话":"contact","手机":"contact","备注":"note","note":"note","来源":"source","事迹":"deeds","简历":"deeds"};
 let _imp=null;
 function parseDelimited(text,delim){
   const rows=[]; let row=[],cell="",inQ=false;
@@ -1251,7 +1251,7 @@ function renderImporter(){
       <div class="modal-foot"><button class="btn" id="impBack">上一步</button><span class="spacer"></span><button class="btn btn-primary" id="impNext">下一步:匹配预览</button></div></div>`;
     mask.querySelectorAll(".impmap").forEach(s=>s.onchange=()=>{ _imp.mapping[+s.dataset.i]=s.value; });
     $("#impBack").onclick=()=>{ _imp.step=1; renderImporter(); };
-    $("#impNext").onclick=()=>{ if(!Object.values(_imp.mapping).includes("name")){ $("#impErr").textContent="请把某列映射为「姓名」"; return; } buildImportPreview(); _imp.step=3; renderImporter(); };
+    $("#impNext").onclick=async()=>{ if(!Object.values(_imp.mapping).includes("name")){ $("#impErr").textContent="请把某列映射为「姓名」"; return; } $("#impErr").textContent="匹配 + 识别日期中(含农历/时辰)…"; await buildImportPreview(); _imp.step=3; renderImporter(); };
   } else { renderImportPreview(); }
 }
 const normName = s => (s||"").normalize("NFKC").replace(/\s+/g,"").trim();   // 匹配键:折叠全/半角空白(只用于匹配,不改写入值)
@@ -1264,17 +1264,31 @@ function matchIncoming(inc){
   const auto = byYear && cands.length===1;   // fail-closed:只有「姓名+生年」唯一命中才自动指向+默认合并;仅按姓名/多命中/无生年→默认新建,逼用户在下拉认领,防一键覆盖错人
   return { inc, nm, y, byYear, options:same, target:(auto?cands[0].id:"__new__"), strategy:(auto?"merge":"new") };
 }
-function buildPreviewFromIncoming(incList){ _imp.preview = incList.filter(inc=>(inc.name||"").trim()).map(matchIncoming); }
+// 异步:出生日期 规则优先,复杂的(农历/年号/带时辰)交 AI → 拆出 公历birth / 农历birth_lunar / 时辰birth_time,再匹配
+async function buildPreviewFromIncoming(incList){
+  const list=incList.filter(inc=>(inc.name||"").trim());
+  const aiNeed=new Set();
+  list.forEach(inc=>{ const b=(inc.birth||"").trim(); if(!b) return; const nd=normalizeDate(b); if(nd.ok&&nd.value){ inc.birth=nd.value; } else { inc._braw=b; aiNeed.add(b); } });
+  if(aiNeed.size){
+    let res=[]; try{ res=await aiNormalizeDates([...aiNeed]); }catch(e){}
+    const mp={}; res.forEach(r=>{ if(r&&r.input) mp[r.input]=r; });
+    list.forEach(inc=>{ if(!inc._braw) return; const g=mp[inc._braw]||{};
+      inc.birth = g.value || inc._braw;                                   // 识别不出保留原文
+      if(g.lunar && !(inc.birth_lunar||"").trim()) inc.birth_lunar=g.lunar;   // 农历生辰
+      if(g.time  && !(inc.birth_time ||"").trim()) inc.birth_time =g.time;    // 出生时间(时辰)
+      delete inc._braw; });
+  }
+  _imp.preview = list.map(matchIncoming);
+}
 function buildImportPreview(){
-  const incs=_imp.rows.map(r=>{ const inc={}; Object.keys(_imp.mapping).forEach(i=>{ const k=_imp.mapping[i]; if(!k) return; let v=(r[i]==null?"":String(r[i])).trim();
-    if(k==="birth"&&v){ const nd=normalizeDate(v); if(nd.ok&&nd.value) v=nd.value; } inc[k]=v; }); return inc; });
-  buildPreviewFromIncoming(incs);
+  const incs=_imp.rows.map(r=>{ const inc={}; Object.keys(_imp.mapping).forEach(i=>{ const k=_imp.mapping[i]; if(!k) return; inc[k]=(r[i]==null?"":String(r[i])).trim(); }); return inc; });
+  return buildPreviewFromIncoming(incs);   // async:含 AI 识别年月日+时辰
 }
 function renderImportPreview(){
   const mask=$("#importMask"); if(!mask) return; const P=_imp.preview;
   const newCount=P.filter(x=>x.target==="__new__").length;
   const rows=P.map((x,i)=>{
-    const sum=[x.inc.name,x.inc.sex,x.inc.birth,x.inc.company].filter(Boolean).join(" · ");
+    const sum=[x.inc.name,x.inc.sex,x.inc.birth,x.inc.birth_time&&("🕐"+x.inc.birth_time),x.inc.birth_lunar&&("农历:"+x.inc.birth_lunar),x.inc.company].filter(Boolean).join(" · ");
     const opts=`<option value="__new__"${x.target==="__new__"?" selected":""}>➕ 新建</option>`+(x.options||[]).map(p=>`<option value="${esc(p.id)}"${x.target===p.id?" selected":""}>${esc(p.name)}·${esc(p.birth||"无生年")}·${esc(p.id)}</option>`).join("");
     const strat = x.target==="__new__" ? `<span class="hint">新建</span>` : `<select class="imp-strat" data-i="${i}"><option value="merge"${x.strategy==="merge"?" selected":""}>合并·填空</option><option value="overwrite"${x.strategy==="overwrite"?" selected":""}>覆盖</option><option value="skip"${x.strategy==="skip"?" selected":""}>跳过</option></select>`;
     const warn=(!x.byYear&&(x.options||[]).length)?' <span class="hint" style="color:#b45309">无生年·仅按姓名,请核对</span>':((x.options||[]).length>1?' <span class="hint" style="color:#b45309">多个同名</span>':'');
@@ -1370,12 +1384,13 @@ async function aiCreateAll(){
   if(!fail) setTimeout(()=>$("#aiMask").classList.remove("open"), 1200);
 }
 // AI 草稿走 reconcile:按 姓名+生年 匹配现有 → 逐条 合并/覆盖/跳过/新建(复用表格导入预览)
-function aiReconcile(){
+async function aiReconcile(){
   const valid=_aiDrafts.filter(d=>(d.name||"").trim() && !d._skip);
   if(!valid.length){ alert("没有可用草稿(需姓名,且未勾「跳过」)"); return; }
-  const incs=valid.map(d=>{ const inc={}; IMPORT_FIELDS.forEach(f=>{ let v=String(d[f.k]==null?"":d[f.k]).trim(); if(!v) return; if(f.k==="birth"){ const nd=normalizeDate(v); if(nd.ok&&nd.value) v=nd.value; } inc[f.k]=v; }); return inc; });
+  const incs=valid.map(d=>{ const inc={}; IMPORT_FIELDS.forEach(f=>{ const v=String(d[f.k]==null?"":d[f.k]).trim(); if(v) inc[f.k]=v; }); return inc; });   // birth 识别交 buildPreviewFromIncoming
   _imp={step:3,headers:[],rows:[],mapping:{},preview:[]};
-  buildPreviewFromIncoming(incs);
+  const msg=$("#aiMsg"); if(msg) msg.textContent="匹配 + 识别日期中(含农历/时辰)…";
+  await buildPreviewFromIncoming(incs);
   const aiM=$("#aiMask"); if(aiM) aiM.classList.remove("open");
   let mask=$("#importMask"); if(!mask){ mask=el("div","mask"); mask.id="importMask"; document.body.appendChild(mask); }
   renderImportPreview(); mask.classList.add("open");
