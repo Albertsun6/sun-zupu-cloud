@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.20.0";
+const APP_VERSION = "v0.20.1";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1217,10 +1217,13 @@ async function parseTable(file){
     const XLSX=await import("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm");
     const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:"array"});
     const sh=wb.Sheets[wb.SheetNames[0]]; const aoa=XLSX.utils.sheet_to_json(sh,{header:1,defval:""}).filter(r=>r.some(c=>String(c||"").trim()));
-    return { headers:(aoa[0]||[]).map(x=>String(x||"")), rows:aoa.slice(1) };
+    const note=wb.SheetNames.length>1?("注意:检测到 "+wb.SheetNames.length+" 个工作表,仅导入第一个「"+wb.SheetNames[0]+"」;合并单元格会致字段丢失,建议先取消合并。"):"";
+    return { headers:(aoa[0]||[]).map(x=>String(x||"")), rows:aoa.slice(1), note };
   }
-  const text=await file.text(); const firstLine=text.split(/\r?\n/)[0]||"";
-  const delim=(firstLine.split("\t").length>firstLine.split(",").length)?"\t":",";
+  let text=await file.text(); text=text.replace(/^﻿/,"");   // 去 BOM(Excel「CSV UTF-8」会加,自家导出也加)
+  const lines=text.split(/\r?\n/).filter(l=>l.trim()).slice(0,8);   // 按前几行的众数判分隔符,比只看首行稳
+  let tabs=0,commas=0; lines.forEach(l=>{ tabs+=(l.match(/\t/g)||[]).length; commas+=(l.match(/,/g)||[]).length; });
+  const delim=(tabs>commas&&tabs>0)?"\t":",";
   const all=parseDelimited(text,delim);
   return { headers:(all[0]||[]).map(x=>String(x||"")), rows:all.slice(1) };
 }
@@ -1235,14 +1238,14 @@ function renderImporter(){
       <div class="modal-foot"><span class="spacer"></span><button class="btn" id="impCancel">取消</button></div></div>`;
     $("#impCancel").onclick=()=>mask.classList.remove("open"); mask.onclick=e=>{ if(e.target===mask) mask.classList.remove("open"); };
     $("#impFile").onchange=async e=>{ const f=e.target.files[0]; if(!f) return; $("#impErr").textContent="解析中…";
-      try{ const {headers,rows}=await parseTable(f); if(!headers.length||!rows.length){ $("#impErr").textContent="没读到数据(需表头+至少1行数据)"; return; }
+      try{ const {headers,rows,note}=await parseTable(f); if(!headers.length||!rows.length){ $("#impErr").textContent="没读到数据(需表头+至少1行数据)"; return; } _imp.note=note||"";
         _imp.headers=headers; _imp.rows=rows; _imp.mapping={};
         headers.forEach((h,i)=>{ const key=(h||"").trim(); _imp.mapping[i]=IMPORT_HMAP[key]||IMPORT_HMAP[key.toLowerCase()]||""; });
         _imp.step=2; renderImporter();
       }catch(err){ $("#impErr").textContent="解析失败:"+err.message; } };
   } else if(_imp.step===2){
     const rowsHtml=_imp.headers.map((h,i)=>`<div class="mergerow"><b style="min-width:7em;display:inline-block">${esc(h||"(空列"+(i+1)+")")}</b> → <select class="impmap" data-i="${i}"><option value="">忽略</option>${IMPORT_FIELDS.map(f=>`<option value="${f.k}"${_imp.mapping[i]===f.k?" selected":""}>${esc(f.label)}</option>`).join("")}</select> <span class="hint">例:${esc(String((_imp.rows[0]&&_imp.rows[0][i])||"").slice(0,18))}</span></div>`).join("");
-    mask.innerHTML=`<div class="modal" style="width:min(640px,100%)"><h2>列映射(${_imp.rows.length} 行)</h2>
+    mask.innerHTML=`<div class="modal" style="width:min(640px,100%)"><h2>列映射(${_imp.rows.length} 行)</h2>${_imp.note?`<p class="hint" style="color:#b45309">${esc(_imp.note)}</p>`:""}
       <p class="hint">把每列对到人物字段(已自动猜,核对)。<b>姓名必须映射</b>;选「忽略」的列不导入。</p>
       <div style="max-height:52vh;overflow:auto">${rowsHtml}</div><div class="err" id="impErr"></div>
       <div class="modal-foot"><button class="btn" id="impBack">上一步</button><span class="spacer"></span><button class="btn btn-primary" id="impNext">下一步:匹配预览</button></div></div>`;
@@ -1251,17 +1254,21 @@ function renderImporter(){
     $("#impNext").onclick=()=>{ if(!Object.values(_imp.mapping).includes("name")){ $("#impErr").textContent="请把某列映射为「姓名」"; return; } buildImportPreview(); _imp.step=3; renderImporter(); };
   } else { renderImportPreview(); }
 }
+const normName = s => (s||"").normalize("NFKC").replace(/\s+/g,"").trim();   // 匹配键:折叠全/半角空白(只用于匹配,不改写入值)
+function matchIncoming(inc){
+  const nm=(inc.name||"").trim(), key=normName(inc.name);
+  const yr=(inc.birth||"").match(/\d{4}/), y=yr?yr[0]:null;
+  const same=state.persons.filter(p=>!p.deleted && normName(p.name)===key);
+  let cands=same, byYear=false;
+  if(y){ cands=same.filter(p=>{ const m=(p.birth||"").match(/\d{4}/); return m&&m[0]===y; }); byYear=true; }
+  const auto = byYear && cands.length===1;   // fail-closed:只有「姓名+生年」唯一命中才自动指向+默认合并;仅按姓名/多命中/无生年→默认新建,逼用户在下拉认领,防一键覆盖错人
+  return { inc, nm, y, byYear, options:same, target:(auto?cands[0].id:"__new__"), strategy:(auto?"merge":"new") };
+}
+function buildPreviewFromIncoming(incList){ _imp.preview = incList.filter(inc=>(inc.name||"").trim()).map(matchIncoming); }
 function buildImportPreview(){
-  _imp.preview=_imp.rows.map(r=>{
-    const inc={}; Object.keys(_imp.mapping).forEach(i=>{ const k=_imp.mapping[i]; if(!k) return; let v=(r[i]==null?"":String(r[i])).trim();
-      if(k==="birth"&&v){ const nd=normalizeDate(v); if(nd.ok&&nd.value) v=nd.value; } inc[k]=v; });
-    const nm=(inc.name||"").trim();
-    const yr=(inc.birth||"").match(/\d{4}/), y=yr?yr[0]:null;
-    const same=state.persons.filter(p=>!p.deleted && (p.name||"").trim()===nm);
-    let cands=same, byYear=false;
-    if(y){ cands=same.filter(p=>{ const m=(p.birth||"").match(/\d{4}/); return m&&m[0]===y; }); byYear=true; }
-    return { inc, nm, y, byYear, options:same, target:(cands.length===1?cands[0].id:"__new__"), strategy:(cands.length===1?"merge":"new") };
-  }).filter(x=>x.nm);
+  const incs=_imp.rows.map(r=>{ const inc={}; Object.keys(_imp.mapping).forEach(i=>{ const k=_imp.mapping[i]; if(!k) return; let v=(r[i]==null?"":String(r[i])).trim();
+    if(k==="birth"&&v){ const nd=normalizeDate(v); if(nd.ok&&nd.value) v=nd.value; } inc[k]=v; }); return inc; });
+  buildPreviewFromIncoming(incs);
 }
 function renderImportPreview(){
   const mask=$("#importMask"); if(!mask) return; const P=_imp.preview;
@@ -1361,6 +1368,17 @@ async function aiCreateAll(){
   $("#aiMsg").textContent=`已创建 ${ok} 人${fail?(",失败 "+fail):""}`;
   _aiDrafts=[]; renderAIDrafts();
   if(!fail) setTimeout(()=>$("#aiMask").classList.remove("open"), 1200);
+}
+// AI 草稿走 reconcile:按 姓名+生年 匹配现有 → 逐条 合并/覆盖/跳过/新建(复用表格导入预览)
+function aiReconcile(){
+  const valid=_aiDrafts.filter(d=>(d.name||"").trim() && !d._skip);
+  if(!valid.length){ alert("没有可用草稿(需姓名,且未勾「跳过」)"); return; }
+  const incs=valid.map(d=>{ const inc={}; IMPORT_FIELDS.forEach(f=>{ let v=String(d[f.k]==null?"":d[f.k]).trim(); if(!v) return; if(f.k==="birth"){ const nd=normalizeDate(v); if(nd.ok&&nd.value) v=nd.value; } inc[f.k]=v; }); return inc; });
+  _imp={step:3,headers:[],rows:[],mapping:{},preview:[]};
+  buildPreviewFromIncoming(incs);
+  const aiM=$("#aiMask"); if(aiM) aiM.classList.remove("open");
+  let mask=$("#importMask"); if(!mask){ mask=el("div","mask"); mask.id="importMask"; document.body.appendChild(mask); }
+  renderImportPreview(); mask.classList.add("open");
 }
 
 /* ---------- 配偶 blob 转边工具(v0.12.0:旧 persons.spouse 自由文本 → 真实配偶人物 + 夫妻边)---------- */
@@ -1592,6 +1610,7 @@ $("#aiBtn")       && ($("#aiBtn").onclick=openAI);
 $("#importBtn")   && ($("#importBtn").onclick=openImporter);
 $("#aiParse")     && ($("#aiParse").onclick=aiParse);
 $("#aiCreateAll") && ($("#aiCreateAll").onclick=aiCreateAll);
+$("#aiReconcile") && ($("#aiReconcile").onclick=aiReconcile);
 $("#aiFileBtn")   && ($("#aiFileBtn").onclick=()=>$("#aiFile").click());
 $("#aiFile")      && ($("#aiFile").onchange=async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f) return;
   if(f.size>3*1024*1024){ $("#aiMsg").textContent="文件过大(>3MB),请拆分或转文本"; return; }
