@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.16.0";
+const APP_VERSION = "v0.16.1";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -172,11 +172,11 @@ function renderFilters(){
 }
 // 名册(人物视图)= 列表/卡片(按世代)双模式调度器;模式记本地。世系总览已并入此处。
 function renderPeople(){
-  const mode = state.peopleMode || (state.peopleMode = (localStorage.getItem("people_mode")||"cards"));
+  const mode = state.peopleMode || (state.peopleMode = (localStorage.getItem("people_view")||"list"));   // 默认列表,再卡片
   const sw=$("#peopleMode");
-  if(sw){ sw.innerHTML=[["cards","🃏 卡片(按世代)"],["list","☰ 列表"]].map(([m,l])=>`<button class="btn btn-sm${mode===m?" btn-primary":""}" data-mode="${m}">${l}</button>`).join("");
-    sw.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{ state.peopleMode=b.dataset.mode; try{localStorage.setItem("people_mode",b.dataset.mode);}catch(e){} renderPeople(); }); }
-  const cards = mode!=="list";
+  if(sw){ sw.innerHTML=[["list","☰ 列表"],["cards","🃏 卡片(按世代)"]].map(([m,l])=>`<button class="btn btn-sm${mode===m?" btn-primary":""}" data-mode="${m}">${l}</button>`).join("");
+    sw.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{ state.peopleMode=b.dataset.mode; try{localStorage.setItem("people_view",b.dataset.mode);}catch(e){} renderPeople(); }); }
+  const cards = mode==="cards";
   const fb=$("#filterBar"), ov=$("#overview"), rb=$("#rosterBox"), sn=$("#shareNote");
   if(fb) fb.style.display=cards?"":"none";
   if(ov) ov.style.display=cards?"":"none";
