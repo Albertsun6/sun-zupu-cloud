@@ -231,6 +231,15 @@ body.viewer .edit-only{display:none !important}
 
 /* 关系列表 / 关系图谱 */
 .reltag{font-size:.72rem;border:1px solid #cbd5e1;border-radius:5px;padding:.02rem .4rem}
+/* 详情页关系列表(下方统一管理) */
+.rel-list{margin-top:.3rem}
+.rel-cat{font-size:.76rem;color:var(--ink-mute);font-weight:600;margin:.55rem 0 .1rem}
+.rel-row{display:flex;align-items:center;gap:.5rem;padding:.34rem .15rem;border-bottom:1px dashed #eef2f7}
+.rel-row .reltag{flex:0 0 auto;min-width:3.2em;text-align:center}
+.rel-row .rel-who{flex:0 0 auto;font-weight:500;border-bottom:1px dotted var(--accent)}
+.rel-row .rel-note{flex:1;min-width:0;color:var(--ink-mute);font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rel-row .rel-act{flex:0 0 auto;display:flex;gap:.25rem}
+.rel-pending{font-size:.85rem;color:var(--warn);background:var(--warn-bg);border-radius:6px;padding:.32rem .55rem;margin:.3rem 0;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap}
 .relquick{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;font-size:.85rem;margin:.3rem 0 .5rem;padding:.5rem;background:#f8fafc;border:1px solid var(--line);border-radius:8px}
 .relquick select,.relquick input{padding:.3rem;border:1px solid var(--line);border-radius:6px;font-size:.85rem}
 .graphctl{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin:.3rem 0;font-size:.82rem;color:#475569}

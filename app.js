@@ -15,7 +15,7 @@ const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; i
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.12.0";
+const APP_VERSION = "v0.12.1";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -514,18 +514,8 @@ async function openDetail(p){
   R("卒", [p.death, p.death_lunar&&("农历 "+p.death_lunar)].filter(Boolean).join(" · "));
   R("出生地", p.birth_place); R("葬地", p.burial);
   R("字号", p.alias); R("性别", p.sex); R("学历/职业", p.occupation); R("居地/迁徙", p.residence);
-  const _fid=state.fatherOf[p.id];
-  if(_fid && byId(_fid)) rows.push(`<div class="drow"><span class="dk">父</span><span class="dv"><a class="plink" data-pid="${esc(_fid)}">${esc(byId(_fid).name)}</a></span></div>`);
-  else if(p.father_note) rows.push(`<div class="drow"><span class="dk">父系待考</span><span class="dv">${esc(p.father_note)} <span class="hint">(线索·待补父子关系)</span></span></div>`);
-  if(p.mother) rows.push(`<div class="drow"><span class="dk">母(原始记载)</span><span class="dv">${esc(p.mother)} <span class="hint">待整理为「母子」关系</span></span></div>`);
-  if(p.spouse) rows.push(`<div class="drow"><span class="dk">配偶(原始记载)</span><span class="dv">${esc(p.spouse)} <span class="hint">待整理</span>${state.canEdit?` <button class="btn btn-sm" id="spConvDetail">整理为配偶</button>`:""}</span></div>`);
   if(rows.length) html+=`<div class="dgrid">${rows.join("")}</div>`;
-
-  const kids=childrenOf(p.id);
-  if(kids.length){
-    html+=`<div class="dsec"><div class="dsec-h">子女(${kids.length})</div><div class="dkids">`
-      +kids.map(k=>`<a class="plink chip" data-pid="${esc(k.id)}">${esc(k.name||"(无名)")}</a>`).join("")+`</div></div>`;
-  }
+  // 关系(父/母/配偶/子女/社交…)统一收到下方「关系网」列表;上方只留个人信息 + 直系链
   if(p.contact||p.address){
     html+=`<div class="dsec"><div class="dsec-h">联系(内部 🔒)</div>`
       +[p.contact&&`<div class="ditem">${esc(p.contact)}</div>`, p.address&&`<div class="ditem">${esc(p.address)}</div>`].filter(Boolean).join("")+`</div>`;
@@ -538,9 +528,11 @@ async function openDetail(p){
     html+=`<div class="dsec"><div class="dsec-h">相册</div><div class="dalbum">`
       +media.map(md=>`<figure><img loading="lazy" src="${esc(window.photoUrl(md.path))}"><figcaption>${esc(md.caption||"")}</figcaption></figure>`).join("")+`</div></div>`;
   }
-  // 关系网(详情页 = 关系管理中心:+加关系连已有 / 改备注 / 删;新建人物用底部 +加亲属)
+  // 关系网(详情页下方 = 关系管理中心:父/母/配偶/子女/社交 全在此整齐列表里增删改)
   const rtMap={}; (state.relTypes&&state.relTypes.length?state.relTypes:(await window.REL.types().catch(()=>[]))).forEach(t=>rtMap[t.type]=t);
   const rels=await window.REL.of(p.id).catch(()=>[]);
+  const catRank=c=>{ const i=["亲属","社交","工作"].indexOf(c); return i<0?9:i; };
+  const relPrio=(type,fromMe)=>((type==="father"||type==="mother")&&!fromMe)?1:(type==="spouse"?2:(((type==="father"||type==="mother")&&fromMe)?3:(type==="sibling"?4:5)));
   let rh="";
   if(rels.length){
     const byCat={};
@@ -548,15 +540,21 @@ async function openDetail(p){
       const t=rtMap[r.type]||{label_zh:r.type,category:"其他"};
       const fromMe=r.from_id===p.id, other=fromMe?r.to_id:r.from_id, op=byId(other); if(!op) return;
       const lab=r.directed?(fromMe?(t.forward_label||t.label_zh):(t.inverse_label||t.label_zh)):t.label_zh;
-      (byCat[t.category||"其他"]=byCat[t.category||"其他"]||[]).push({r,op,lab,color:t.color});
+      (byCat[t.category||"其他"]=byCat[t.category||"其他"]||[]).push({r,op,lab,color:t.color,prio:relPrio(r.type,fromMe)});
     });
-    Object.keys(byCat).forEach(cat=>{
-      rh+=`<div class="hint" style="margin:.4rem 0 .1rem">${esc(cat)}</div>`;
-      byCat[cat].forEach(it=>{ rh+=`<div class="ditem"><span class="reltag" style="border-color:${esc(it.color||'#cbd5e1')};color:${esc(it.color||'#475569')}">${esc(it.lab)}</span> <a class="plink" data-pid="${esc(it.op.id)}">${esc(it.op.name||'(无名)')}</a>${it.r.note?`<span class="hint"> · ${esc(it.r.note)}</span>`:""}${state.canEdit?` <button class="btn btn-sm relnote" data-rid="${it.r.id}" title="改备注">改</button><button class="btn btn-sm reldel" data-rid="${it.r.id}" title="删除">✕</button>`:""}</div>`; });
+    Object.keys(byCat).sort((a,b)=>catRank(a)-catRank(b)).forEach(cat=>{
+      byCat[cat].sort((a,b)=>a.prio-b.prio || (gk(genOf(a.op.id))-gk(genOf(b.op.id))) || (a.op.sort_order||0)-(b.op.sort_order||0));
+      rh+=`<div class="rel-cat">${esc(cat)}</div>`;
+      byCat[cat].forEach(it=>{ rh+=`<div class="rel-row"><span class="reltag" style="border-color:${esc(it.color||'#cbd5e1')};color:${esc(it.color||'#475569')}">${esc(it.lab)}</span><a class="plink rel-who" data-pid="${esc(it.op.id)}">${esc(it.op.name||'(无名)')}</a><span class="rel-note">${it.r.note?esc(it.r.note):""}</span>${state.canEdit?`<span class="rel-act"><button class="btn btn-sm relnote" data-rid="${it.r.id}" title="改备注">改</button><button class="btn btn-sm reldel" data-rid="${it.r.id}" title="删除">✕</button></span>`:""}</div>`; });
     });
-  } else rh=`<div class="hint">(暂无关系)</div>`;
+  } else rh=`<div class="hint">(暂无关系,点「+ 加关系」)</div>`;
+  // 原始记载/待考 折叠进关系区(尚未转成边的旧文本)
+  let pending="";
+  if(!state.fatherOf[p.id] && p.father_note) pending+=`<div class="rel-pending">父系待考:${esc(p.father_note)} <span class="hint">线索,待补父子关系</span></div>`;
+  if(p.mother) pending+=`<div class="rel-pending">母(原始记载):${esc(p.mother)} <span class="hint">待整理为母子关系</span></div>`;
+  if(p.spouse) pending+=`<div class="rel-pending">配偶(原始记载):${esc(p.spouse)} ${state.canEdit?`<button class="btn btn-sm" id="spConvDetail">整理为配偶</button>`:`<span class="hint">待整理</span>`}</div>`;
   const addForm = state.canEdit ? `<div class="relquick" id="relAddForm" style="display:none"><select id="dq_to"></select><span id="dqNewWrap" style="display:none">姓名 <input id="dq_newname" placeholder="新人物姓名" style="width:7em"> <select id="dq_newsex"><option value="">性别</option><option>男</option><option>女</option></select></span> 是 <b>${esc(p.name||"本人")}</b> 的 <select id="dq_type"></select> <input id="dq_note" placeholder="备注(可空,如 原配/续娶)" style="width:9em"> <button class="btn btn-sm btn-primary" id="dq_add">加</button> <span class="hint" id="dq_msg"></span></div>` : "";
-  html+=`<div class="dsec"><div class="dsec-h">关系网(${rels.length}) <button class="btn btn-sm" id="relEgoBtn">🎯 关系圈</button>${state.canEdit?` <button class="btn btn-sm" id="relAddToggle">+ 加关系</button>`:""}</div>${addForm}${rh}</div>`;
+  html+=`<div class="dsec"><div class="dsec-h">关系网(${rels.length}) <button class="btn btn-sm" id="relEgoBtn">🎯 关系圈</button>${state.canEdit?` <button class="btn btn-sm" id="relAddToggle">+ 加关系</button>`:""}</div>${pending}${addForm}<div class="rel-list">${rh}</div></div>`;
   box.innerHTML=html;
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });
   { const eb=$("#relEgoBtn"); if(eb) eb.onclick=()=>{ state.graphCenter=p.id; state.pathA=""; state.pathB=""; closeDetail(); switchView("graph"); }; }
