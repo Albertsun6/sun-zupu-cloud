@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.23.0";
+const APP_VERSION = "v0.24.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1441,10 +1441,26 @@ let _aiDrafts=[];
 const AI_DRAFT_FIELDS=[
   {k:"name",label:"姓名"},{k:"sex",label:"性别",type:"sex"},
   {k:"char_gen",label:"字辈"},{k:"rank",label:"行第"},
-  {k:"birth",label:"生年"},{k:"birth_lunar",label:"农历生"},{k:"death",label:"卒年"},
+  {k:"birth",label:"出生(公历)"},{k:"birth_lunar",label:"农历生(含属相)"},{k:"birth_time",label:"出生时间"},{k:"death",label:"卒年"},
   {k:"birth_place",label:"出生地"},{k:"occupation",label:"职业"},{k:"residence",label:"居地"},
   {k:"spouse",label:"配偶(暂存)"},{k:"mother",label:"母(暂存)"},{k:"father_note",label:"父(文字)"},{k:"note",label:"备注"}
 ];
+// 农历日期落在该年闰月、但原文没标"闰"→ 歧义(正月 vs 闰月差约一个月)。返回闰月号(0=无歧义)
+function lunarLeapAmbiguous(raw){ const cp=parseDateParts(raw); if(!(cp.is_lunar&&cp.year&&cp.month&&!cp.leap)) return 0; const lc=window.LUNARCONV; const lm=(lc&&lc.leapMonthOf)?lc.leapMonthOf(cp.year):0; return lm===cp.month?lm:0; }
+// 把草稿的出生串用万年历拆成 公历/农历(属相)/时辰(客户端优先,年号/民国缺年才调AI);幂等。供 识别 与 创建 共用
+async function cleanDraftsDates(drafts){
+  const need=new Set(); drafts.forEach(d=>{ const b=(d.birth||"").trim(); d._braw=b; if(b&&needsAIDate(b)) need.add(b); });
+  const mp={}; if(need.size){ try{ (await aiNormalizeDates([...need])).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
+  drafts.forEach(d=>{ const raw=d._braw; delete d._braw; d._leapWarn=""; if(!raw) return;
+    const rd=resolveDate(mp[raw], raw);
+    if(rd.birth) d.birth=rd.birth;
+    if(rd.birth_lunar && _messyDate(d.birth_lunar)) d.birth_lunar=rd.birth_lunar;
+    if(rd.birth_time && _messyDate(d.birth_time)) d.birth_time=rd.birth_time;
+    // DeepSeek 常把"属羊"塞进备注;换算后农历已含属相 → 去掉纯属相的冗余备注
+    if(/^属[鼠牛虎兔龙蛇马羊猴鸡狗猪]$/.test((d.note||"").trim()) && /属[鼠牛虎兔龙蛇马羊猴鸡狗猪]/.test(d.birth_lunar||"")) d.note="";
+    const lm=lunarLeapAmbiguous(raw); if(lm) d._leapWarn=`农历${lm}月落在闰${lm}月之年,已按正${lm}月算→${d.birth};若实为闰月,用万年历勾「闰月」改`;
+  });
+}
 function openAI(){ $("#aiText").value=""; $("#aiMsg").textContent=""; $("#aiDrafts").innerHTML=""; $("#aiCreateBar").style.display="none"; _aiDrafts=[]; $("#aiMask").classList.add("open"); }
 async function aiParse(){
   const text=$("#aiText").value.trim(), msg=$("#aiMsg");
@@ -1456,7 +1472,9 @@ async function aiParse(){
     const data=await r.json().catch(()=>({error:"返回非JSON(可能AI代理未部署)"}));
     if(!r.ok){ msg.textContent="失败:"+(data.error||r.status); return; }
     _aiDrafts=(data.persons||[]).map(p=>{ const d={}; AI_DRAFT_FIELDS.forEach(f=>d[f.k]=p[f.k]!=null?String(p[f.k]):""); if(!d.father_note&&p.father) d.father_note="父:"+p.father; return d; });
-    msg.textContent=`识别到 ${_aiDrafts.length} 人,请核对补齐后创建`;
+    msg.textContent=`识别到 ${_aiDrafts.length} 人,正用万年历换算日期/时辰…`;
+    await cleanDraftsDates(_aiDrafts);   // 当场拆 公历/农历(属相)/时辰,所见即所得(不必等创建)
+    msg.textContent=`识别到 ${_aiDrafts.length} 人,日期已按万年历换算,请核对补齐后创建`;
     renderAIDrafts();
   }catch(e){ msg.textContent="网络/服务错误:"+e.message; }
   finally{ $("#aiParse").disabled=false; }
@@ -1470,7 +1488,8 @@ function renderAIDrafts(){
     const nm=(d.name||"").trim(); const ex=nm?(existing[nm]||[]):[]; const batchDup=!!(nm&&seen[nm]); if(nm) seen[nm]=(seen[nm]||0)+1;
     const warn=(ex.length||batchDup)
       ? `<span class="aidup">⚠ ${ex.length?("库中已有同名:"+ex.slice(0,3).map(p=>esc(p.name)+"(第"+genStr(p.id)+"代)").join("、")):"本批内重复"}</span><label class="aidraft-skip"><input type="checkbox" data-i="${i}" data-skip${d._skip?" checked":""}> 跳过不建</label>` : "";
-    return `<div class="aidraft${d._skip?" skipped":""}"><div class="aidraft-h">#${i+1} ${esc(d.name||"(未命名)")} ${warn} <button class="btn btn-sm aidraft-del" data-i="${i}">删除此条</button></div><div class="aidraft-grid">`
+    const lw=d._leapWarn?`<span class="aidup" style="background:#fef9c3;color:#854d0e;border-color:#fde68a">⚠ ${esc(d._leapWarn)}</span>`:"";
+    return `<div class="aidraft${d._skip?" skipped":""}"><div class="aidraft-h">#${i+1} ${esc(d.name||"(未命名)")} ${warn}${lw} <button class="btn btn-sm aidraft-del" data-i="${i}">删除此条</button></div><div class="aidraft-grid">`
     + AI_DRAFT_FIELDS.map(f=>{
         if(f.type==="sex") return `<label>${f.label}<select data-i="${i}" data-k="sex"><option value=""${!d.sex?" selected":""}></option><option${d.sex==="男"?" selected":""}>男</option><option${d.sex==="女"?" selected":""}>女</option></select></label>`;
         return `<label>${f.label}<input data-i="${i}" data-k="${f.k}" value="${esc(d[f.k]||"")}"></label>`;
@@ -1486,11 +1505,7 @@ async function aiCreateAll(){
   if(!valid.length){ alert("没有可创建的人物(需姓名,且未勾「跳过」)"); return; }
   if(!confirm("将创建 "+valid.length+" 个人物(状态=待考)"+(skipped?(",跳过 "+skipped+" 条疑似重复"):"")+"?")) return;
   const btn=$("#aiCreateAll"); btn.disabled=true; btn.textContent="识别日期+创建中…";
-  // 出生日期统一走万年历拆 公历/农历/时辰(客户端优先,只有年号/民国年缺年才调 AI)
-  const need=new Set(); valid.forEach(d=>{ const b=(d.birth||"").trim(); if(!b) return; d._braw=b; if(needsAIDate(b)) need.add(b); });
-  const mp={}; if(need.size){ try{ (await aiNormalizeDates([...need])).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
-  valid.forEach(d=>{ if(!d._braw) return; const rd=resolveDate(mp[d._braw], d._braw);
-    if(rd.birth)d.birth=rd.birth; if(rd.birth_lunar&&_messyDate(d.birth_lunar))d.birth_lunar=rd.birth_lunar; if(rd.birth_time&&_messyDate(d.birth_time))d.birth_time=rd.birth_time; delete d._braw; });
+  await cleanDraftsDates(valid);   // 兜底再拆一次(识别时已拆;用户若手改了出生串这里纠正),幂等
   let ok=0, fail=0;
   for(const d of valid){ try{ await api("POST","/api/persons",{ ...d, status:"待考" }); ok++; }catch(e){ fail++; } }
   btn.textContent="全部新建为人物";

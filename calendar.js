@@ -18,6 +18,7 @@ const _shichenOf = h => _shichen12[Math.floor(((h + 1) % 24) / 2)] + "时";
 window.LUNARCONV = {
   get ready(){ return !!Solar; },
   shichenOf: _shichenOf,
+  leapMonthOf(y){ try { return LunarYear.fromYear(y).getLeapMonth() || 0; } catch { return 0; } },   // 该农历年的闰月(0=无闰)
   lunarToSolar(y, m, d, leap){ try { const lo = Lunar.fromYmd(y, leap ? -m : m, d), so = lo.getSolar();
     return { solar: `${so.getYear()}-${pad(so.getMonth())}-${pad(so.getDay())}`, lunar: `农历${lo.getMonthInChinese()}月${lo.getDayInChinese()} 属${lo.getYearShengXiao()}`, gz: lo.getYearInGanZhi(), shengxiao: lo.getYearShengXiao() }; } catch (e) { return null; } },
   solarToLunar(y, m, d){ try { const lu = Solar.fromYmd(y, m, d).getLunar();
