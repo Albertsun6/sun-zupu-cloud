@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.18.1";
+const APP_VERSION = "v0.19.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -51,7 +51,7 @@ const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[],
                 editing:null, user:null, canEdit:false, lineage:"",
                 graphCenter:"", graphHops:2, pathA:"", pathB:"",
                 fatherOf:{}, motherOf:{}, childrenMap:{}, spouseOf:{}, _genCache:{}, _lineageCache:{}, lineages:null,
-                filters:{charGen:"",status:"",alive:""} };
+                filters:{charGen:"",status:"",alive:""}, customFilters:[] };
 
 // api(method,path,body) 由 db.js 提供(Supabase shim);此处不再定义。
 async function reloadPersons(){ state.persons = await api("GET","/api/persons"); }
@@ -1150,25 +1150,42 @@ const ROSTER_COLS = [
 const ROSTER_DEFAULT = ["name","gen","char_gen","sex","alive","lineage","birth","death","occupation"];
 function rosterCols(){ try{ const s=JSON.parse(localStorage.getItem("roster_cols")||"null"); if(Array.isArray(s)&&s.length) return s; }catch(e){} return ROSTER_DEFAULT.slice(); }
 let _rosterSort={k:"gen",dir:1}, _colpickOpen=false;
+function cellVal(p,k){ return k==="rel_count"?(state.relCount[p.id]||0):(k==="gen"?(genOf(p.id)??""):(k==="lineage"?familiesOf(p.id).join(" / "):(p[k]==null?"":p[k]))); }
 function renderRoster(){
   const box=$("#rosterBox"); if(!box) return;
   const colset=new Set(rosterCols());
   const orderedCols=ROSTER_COLS.filter(c=>colset.has(c.k));
   let list=state.persons.filter(p=>!p.deleted && matchQ(p));
+  (state.customFilters||[]).forEach(f=>{ const v=(f.val||"").trim().toLowerCase(); if(!v) return;   // 自定义字段筛选(AND)
+    list=list.filter(p=>{ const cell=String(cellVal(p,f.field)??"").toLowerCase(); return f.op==="eq"?cell===v:cell.includes(v); }); });
   const sk=_rosterSort.k, dir=_rosterSort.dir;
   list=list.slice().sort((a,b)=>{ let va,vb; if(sk==="gen"){va=gk(genOf(a.id));vb=gk(genOf(b.id));} else if(sk==="rel_count"){va=state.relCount[a.id]||0;vb=state.relCount[b.id]||0;} else if(sk==="lineage"){va=familiesOf(a.id).join("/");vb=familiesOf(b.id).join("/");} else {va=(a[sk]??"")+"";vb=(b[sk]??"")+"";}
     return va<vb?-dir:va>vb?dir:0; });
   const picker=`<details class="colpick"${_colpickOpen?" open":""}><summary>列设置(${colset.size} 列)</summary><div class="colgrid">`
     + ROSTER_COLS.map(c=>`<label><input type="checkbox" data-col="${c.k}"${colset.has(c.k)?" checked":""}> ${esc(c.label)}</label>`).join("") + `</div></details>`;
-  const bar=`<div class="rosterbar">${picker}<span class="hint">点表头排序 · 点一行${state.canEdit?"看详情/编辑":"看详情"}</span></div>`;   // 族谱筛选与计数已移除(计数在上方按钮)
+  const bar=`<div class="rosterbar">${picker}<span class="hint">点表头排序 · 点一行${state.canEdit?"看详情/编辑":"看详情"}</span></div>`;
+  // 筛选行(列设置行之后):查找(从顶栏移来)+ 自定义字段筛选(可多条 AND)
+  const cfRows=(state.customFilters||[]).map((f,i)=>`<span class="cfrow" style="display:inline-flex;gap:.2rem;align-items:center"><select class="cf-field" data-i="${i}">${ROSTER_COLS.map(c=>`<option value="${c.k}"${c.k===f.field?" selected":""}>${esc(c.label)}</option>`).join("")}</select><select class="cf-op" data-i="${i}"><option value="contains"${f.op!=="eq"?" selected":""}>包含</option><option value="eq"${f.op==="eq"?" selected":""}>等于</option></select><input class="cf-val" data-i="${i}" value="${esc(f.val||"")}" placeholder="值" style="width:7em"><button class="btn btn-sm cf-del" data-i="${i}" title="删条件">✕</button></span>`).join("");
+  const hasFilter=(state.q||"").trim()||(state.customFilters||[]).some(f=>(f.val||"").trim());
+  const filterRow=`<div class="rosterfilter" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin:.5rem 0">`
+    +`<input id="rosterSearch" type="text" placeholder="🔍 搜索姓名/字号/备注…" value="${esc(state.q||"")}" style="min-width:11em;flex:0 1 16em">`
+    +`${cfRows}<button class="btn btn-sm" id="cfAdd">+ 字段筛选</button>`
+    +`<span class="hint">${list.length} 人</span>${hasFilter?`<button class="btn btn-sm" id="cfClear">清除</button>`:""}</div>`;
   const thead="<tr>"+orderedCols.map(c=>`<th data-sk="${c.k}">${esc(c.label)}${sk===c.k?(dir>0?" ▲":" ▼"):""}</th>`).join("")+"</tr>";
-  const fmt=(p,k)=> k==="rel_count"?(state.relCount[p.id]||0):(k==="gen"?(genOf(p.id)??""):(k==="lineage"?familiesOf(p.id).join(" / "):(p[k]==null?"":p[k])));
-  const rows=list.map(p=>`<tr data-pid="${esc(p.id)}">`+orderedCols.map(c=>`<td>${esc(String(fmt(p,c.k)))}</td>`).join("")+`</tr>`).join("");
-  box.innerHTML=bar+`<div class="rostertable"><table class="roster"><thead>${thead}</thead><tbody>${rows||""}</tbody></table></div>`;
+  const rows=list.map(p=>`<tr data-pid="${esc(p.id)}">`+orderedCols.map(c=>`<td>${esc(String(cellVal(p,c.k)))}</td>`).join("")+`</tr>`).join("");
+  box.innerHTML=bar+filterRow+`<div class="rostertable"><table class="roster"><thead>${thead}</thead><tbody>${rows||""}</tbody></table></div>`;
   const dt=box.querySelector(".colpick"); if(dt) dt.ontoggle=e=>{ _colpickOpen=e.target.open; };
   box.querySelectorAll(".colpick input[type=checkbox]").forEach(cb=>cb.onchange=()=>{
     const cur=new Set(rosterCols()); cb.checked?cur.add(cb.dataset.col):cur.delete(cb.dataset.col);
     localStorage.setItem("roster_cols", JSON.stringify(ROSTER_COLS.filter(c=>cur.has(c.k)).map(c=>c.k))); renderRoster(); });
+  const refocus=sel=>{ const e2=document.querySelector(sel); if(e2){ const v=e2.value; e2.focus(); try{e2.setSelectionRange(v.length,v.length);}catch(_){} } };
+  { const rs=$("#rosterSearch"); if(rs) rs.oninput=()=>{ state.q=rs.value; const top=$("#search"); if(top)top.value=rs.value; renderRoster(); refocus("#rosterSearch"); }; }
+  box.querySelectorAll(".cf-field").forEach(s=>s.onchange=()=>{ state.customFilters[+s.dataset.i].field=s.value; renderRoster(); });
+  box.querySelectorAll(".cf-op").forEach(s=>s.onchange=()=>{ state.customFilters[+s.dataset.i].op=s.value; renderRoster(); });
+  box.querySelectorAll(".cf-val").forEach(inp=>inp.oninput=()=>{ const i=+inp.dataset.i; state.customFilters[i].val=inp.value; renderRoster(); refocus('.cf-val[data-i="'+i+'"]'); });
+  box.querySelectorAll(".cf-del").forEach(b=>b.onclick=()=>{ state.customFilters.splice(+b.dataset.i,1); renderRoster(); });
+  { const a=$("#cfAdd"); if(a) a.onclick=()=>{ (state.customFilters=state.customFilters||[]).push({field:ROSTER_COLS[0].k,op:"contains",val:""}); renderRoster(); }; }
+  { const c=$("#cfClear"); if(c) c.onclick=()=>{ state.q=""; const top=$("#search"); if(top)top.value=""; state.customFilters=[]; renderRoster(); }; }
   box.querySelectorAll("th[data-sk]").forEach(th=>th.onclick=()=>{ const k=th.dataset.sk; _rosterSort=(sk===k)?{k,dir:-dir}:{k,dir:1}; renderRoster(); });
   box.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{ const p=byId(tr.dataset.pid); if(p) openDetail(p); });   // 点行看详情(含关系列表),编辑走详情里「编辑」
 }
