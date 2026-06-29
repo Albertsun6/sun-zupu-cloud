@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.21.2";
+const APP_VERSION = "v0.22.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -626,7 +626,7 @@ async function openDetail(p){
   if(!state.fatherOf[p.id] && p.father_note) pending+=`<div class="rel-pending">父系待考:${esc(p.father_note)} <span class="hint">线索,待补父子关系</span></div>`;
   if(p.mother) pending+=`<div class="rel-pending">母(原始记载):${esc(p.mother)} <span class="hint">待整理为母子关系</span></div>`;
   if(p.spouse) pending+=`<div class="rel-pending">配偶(原始记载):${esc(p.spouse)} ${state.canEdit?`<button class="btn btn-sm" id="spConvDetail">整理为配偶</button>`:`<span class="hint">待整理</span>`}</div>`;
-  const addForm = state.canEdit ? `<div class="relquick" id="relAddForm" style="display:none"><select id="dq_to"></select><span id="dqNewWrap" style="display:none">姓名 <input id="dq_newname" placeholder="新人物姓名" style="width:7em"> <select id="dq_newsex"><option value="">性别</option><option>男</option><option>女</option></select></span> 是 <b>${esc(p.name||"本人")}</b> 的 <select id="dq_type"></select> <input id="dq_note" placeholder="备注(可空,如 原配/续娶)" style="width:9em"> <button class="btn btn-sm btn-primary" id="dq_add">加</button> <span class="hint" id="dq_msg"></span></div>` : "";
+  const addForm = state.canEdit ? `<div class="relquick" id="relAddForm" style="display:none"><input id="dq_search" placeholder="🔍 筛选姓名/字号/ID" style="width:8.5em;margin-right:.2rem"><select id="dq_to"></select><span id="dqNewWrap" style="display:none">姓名 <input id="dq_newname" placeholder="新人物姓名" style="width:7em"> <select id="dq_newsex"><option value="">性别</option><option>男</option><option>女</option></select></span> 是 <b>${esc(p.name||"本人")}</b> 的 <select id="dq_type"></select> <input id="dq_note" placeholder="备注(可空,如 原配/续娶)" style="width:9em"> <button class="btn btn-sm btn-primary" id="dq_add">加</button> <span class="hint" id="dq_msg"></span></div>` : "";
   html+=`<div class="dsec"><div class="dsec-h">关系网(${rels.length}) <button class="btn btn-sm" id="relEgoBtn">🎯 关系圈</button>${state.canEdit?` <button class="btn btn-sm" id="relAddToggle">+ 加关系</button>`:""}</div>${pending}${addForm}<div class="rel-list">${rh}</div></div>`;
   box.innerHTML=html;
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });
@@ -643,8 +643,10 @@ async function openDetail(p){
       try{ await window.REL.update(rid,{note:nv.trim(),start_date:yv.trim()}); openDetail(byId(p.id)); }catch(e){ alert("失败:"+e.message); }
     } else { const nv=prompt("关系备注:", r.note||""); if(nv===null)return; try{ await window.REL.update(rid,{note:nv.trim()}); openDetail(byId(p.id)); }catch(e){ alert("失败:"+e.message); } } });
   const tgl=$("#relAddToggle");
+  const fillDqTo=q=>{ const dto=$("#dq_to"); if(dto) dto.innerHTML=`<option value="">— 选已有人物 —</option><option value="__new__">➕ 新建人物并连上…</option>`+personOptions("",q); };
   if(tgl) tgl.onclick=()=>{ const f=$("#relAddForm"); const show=f.style.display==="none"; f.style.display=show?"":"none";
-    if(show){ $("#dq_to").innerHTML=`<option value="">— 选已有人物 —</option><option value="__new__">➕ 新建人物并连上…</option>`+personOptions(); $("#dq_type").innerHTML=relOptionsHtml(); const dn=$("#dqNewWrap"); if(dn)dn.style.display="none"; const t=$("#dq_to"); if(t)t.focus(); } };
+    if(show){ const se=$("#dq_search"); if(se)se.value=""; fillDqTo(""); $("#dq_type").innerHTML=relOptionsHtml(); const dn=$("#dqNewWrap"); if(dn)dn.style.display="none"; if(se)se.focus(); } };
+  { const se=$("#dq_search"); if(se) se.oninput=()=>fillDqTo(se.value); }   // 输入即筛选下拉(人多时用)
   { const dto=$("#dq_to"); if(dto) dto.onchange=()=>{ const nw=$("#dqNewWrap"); if(nw) nw.style.display=(dto.value==="__new__")?"":"none"; }; }
   const dqAdd=$("#dq_add");
   if(dqAdd) dqAdd.onclick=async()=>{
@@ -957,54 +959,80 @@ function extractTime(raw){
   return "";
 }
 // AI 拆出的结构化字段(+原文)→ {birth(公历)/birth_lunar(农历)/birth_time(时辰)};农历↔公历用万年历精确换算,时间用客户端规则抽(原文优先、AI 兜底)
+// 客户端解析日期组件(不靠弱模型):年(阿拉伯/中文四位)+ 农历或公历的月日(初十=10/廿三=23/腊月=12/2月=2/26日=26)+ 闰 + is_lunar
+const _LMON={正:1,冬:11,腊:12};
+function _cnDay(s){ let m;
+  if(/初十/.test(s))return 10;
+  if((m=s.match(/初([一二三四五六七八九])/)))return _CNNUM[m[1]];
+  if((m=s.match(/(?:廿|卄)([一二三四五六七八九])/)))return 20+_CNNUM[m[1]];
+  if((m=s.match(/二十([一二三四五六七八九])/)))return 20+_CNNUM[m[1]];
+  if(/三十|卅/.test(s))return 30;
+  if(/(?:廿|卄|二十)(?![一二三四五六七八九])/.test(s))return 20;
+  if((m=s.match(/十([一二三四五六七八九])/)))return 10+_CNNUM[m[1]];
+  if((m=s.match(/(\d{1,2})\s*[日号]/)))return +m[1];
+  return null; }
+function parseDateParts(raw){
+  const s=String(raw||""); const o={is_lunar:false,year:null,month:null,day:null,leap:false};
+  let m=s.match(/(\d{3,4})\s*年/)||s.match(/(?:^|\D)(\d{4})(?:\D|$)/); if(m&&+m[1]>=1000&&+m[1]<=2200)o.year=+m[1];
+  if(o.year==null){ const cm=s.match(/([〇零一二三四五六七八九]{4})\s*年/); if(cm){ const y=+[...cm[1]].map(c=>_CNNUM[c]).join(""); if(y>=1000&&y<=2200)o.year=y; } }
+  if(/闰/.test(s))o.leap=true;
+  if(/农历|阴历|初[一二三四五六七八九十]|廿|卄|卅|腊月|冬月|正月|闰.{0,2}月|光绪|宣统|同治|咸丰|道光|嘉庆|乾隆|雍正|康熙|顺治|崇祯|万历|民国|[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]/.test(s))o.is_lunar=true;
+  let mo=s.match(/([正冬腊])月/); if(mo){ o.month=_LMON[mo[1]]; o.is_lunar=true; }
+  else if((mo=s.match(/(?:闰)?\s*(\d{1,2})\s*月/)))o.month=+mo[1];
+  else if((mo=s.match(/(?:闰)?\s*(十[一二]|[一二三四五六七八九]|十)\s*月/))){ const v=_cnNum(mo[1]); if(v)o.month=v; }
+  const d=_cnDay(s); if(d!=null){ o.day=d; if(/初|廿|卄|卅/.test(s))o.is_lunar=true; }
+  if(o.month==null||o.day==null){ const iso=s.match(/(\d{3,4})[\-\/.](\d{1,2})[\-\/.](\d{1,2})/); if(iso){ o.year=+iso[1];o.month=+iso[2];o.day=+iso[3]; } }
+  if(o.month==null){ const i2=s.match(/(\d{3,4})[\-\/.](\d{1,2})(?![\-\/.\d])/); if(i2){ o.year=o.year||+i2[1];o.month=+i2[2]; } }
+  if(o.month!=null&&(o.month<1||o.month>12))o.month=null; if(o.day!=null&&(o.day<1||o.day>31))o.day=null;
+  return o; }
+// 是否还需要 AI:客户端缺年(多为年号/民国,需AI换算)、或农历但缺月/日 时才调 AI
+function needsAIDate(raw){ const cp=parseDateParts(raw); if(!cp.year)return true; if(cp.is_lunar)return !(cp.month&&cp.day); return false; }
+// 客户端组件优先、AI 仅补缺(尤其年号年);用万年历把 公历↔农历 双向补齐;时间走 extractTime
 function resolveDate(r, raw){
   r=r||{}; const out={birth:"",birth_lunar:"",birth_time:""}, p2=n=>String(n).padStart(2,"0"), LC=window.LUNARCONV;
   out.birth_time = extractTime(raw||"") || extractTime(r.time||"");
-  const y=r.year, m=r.month, d=r.day; if(!y) return out;
-  if(r.is_lunar){
-    if(m&&d&&LC&&LC.ready){ const c=LC.lunarToSolar(y,m,d,!!r.leap); if(c){ out.birth=c.solar; out.birth_lunar=c.lunar; return out; } }
+  const cp=parseDateParts(raw||"");
+  const is_lunar = cp.is_lunar || r.is_lunar===true;
+  const y = cp.year  || (Number.isInteger(r.year)?r.year:null);
+  const m = cp.month || (Number.isInteger(r.month)?r.month:null);
+  const d = cp.day   || (Number.isInteger(r.day)?r.day:null);
+  const leap = cp.leap || r.leap===true;
+  if(!y) return out;
+  if(is_lunar){
+    if(m&&d&&LC&&LC.ready){ const c=LC.lunarToSolar(y,m,d,!!leap); if(c){ out.birth=c.solar; out.birth_lunar=c.lunar; return out; } }
     out.birth=String(y); out.birth_lunar=(m&&d)?`农历${m}月${d}日`:"";   // 转换失败/缺月日:只能给年
   } else if(m&&d){ out.birth=`${y}-${p2(m)}-${p2(d)}`; if(LC&&LC.ready){ const c=LC.solarToLunar(y,m,d); if(c) out.birth_lunar=c.lunar; } }
   else if(m){ out.birth=`${y}-${p2(m)}`; } else out.birth=String(y);
   return out;
 }
-// 表单失焦即时规范:规则能认就直接规范;认不出调 AI;再认不出黄字提示
+// 表单失焦:统一走万年历拆 公历/农历/时辰(客户端优先,缺年的年号才调 AI),空的农历/时辰自动补
 async function onBirthBlur(){
   const inp=$("#f_birth"), hint=$("#birthHint"); if(!inp) return; const raw=inp.value.trim();
   if(!raw){ if(hint) hint.textContent=""; return; }
-  const r=normalizeDate(raw);
-  if(r.ok){ if(r.value&&r.value!==raw){ inp.value=r.value; if(hint){ hint.textContent="已规范"; hint.style.color="#047857"; } } else if(hint){ hint.textContent=""; } return; }
-  if(hint){ hint.textContent="识别中…"; hint.style.color="#64748b"; }
-  try{ const g=(await aiNormalizeDates([raw]))[0]; const rd=resolveDate(g, raw);
-    if(rd.birth||rd.birth_lunar||rd.birth_time){ if(rd.birth) inp.value=rd.birth;
-      const lf=$("#f_birth_lunar"); if(lf&&rd.birth_lunar&&!lf.value.trim()) lf.value=rd.birth_lunar;
-      const tf=$("#f_birth_time");  if(tf&&rd.birth_time &&!tf.value.trim()) tf.value=rd.birth_time;
-      if(hint){ hint.textContent="已按万年历拆为 公历/农历/时辰"; hint.style.color="#047857"; } }
-    else if(hint){ hint.textContent="⚠无法识别,请填 年/年-月/年-月-日"; hint.style.color="#b45309"; }
-  }catch(e){ if(hint){ hint.textContent="识别失败:"+e.message; hint.style.color="#b45309"; } }
+  let g={}; if(needsAIDate(raw)){ if(hint){ hint.textContent="识别中…"; hint.style.color="#64748b"; } try{ g=(await aiNormalizeDates([raw]))[0]||{}; }catch(e){} }
+  const rd=resolveDate(g, raw);
+  if(rd.birth||rd.birth_lunar||rd.birth_time){ if(rd.birth) inp.value=rd.birth;
+    const lf=$("#f_birth_lunar"); if(lf&&rd.birth_lunar&&!lf.value.trim()) lf.value=rd.birth_lunar;
+    const tf=$("#f_birth_time");  if(tf&&rd.birth_time &&!tf.value.trim()) tf.value=rd.birth_time;
+    if(hint){ hint.textContent="已按万年历拆为 公历/农历/时辰"; hint.style.color="#047857"; } }
+  else if(hint){ hint.textContent="⚠无法识别,请填 年/年-月/年-月-日"; hint.style.color="#b45309"; }
 }
 // 批量规范:扫全部 birth → 规则 + AI兜底 → 预览(原→新,不识别标红)→ 勾选确认才改(可撤销)
 const _messyDate = s => !(s||"").trim() || /\d{4}|时|分/.test(s);   // 空 或 含年/时=未拆的原始串,可被万年历清洗版覆盖
 async function openDateNormalizer(){
   let mask=$("#dateNormMask"); if(!mask){ mask=el("div","mask"); mask.id="dateNormMask"; document.body.appendChild(mask); }
-  const people=state.persons.filter(p=>!p.deleted && (p.birth||"").trim());
-  const rows=[], needAI=[];
-  people.forEach(p=>{ const raw=(p.birth||"").trim(); const r=normalizeDate(raw);
-    if(r.ok){ if(r.value!==raw) rows.push({p,raw,patch:{birth:r.value},desc:r.value,src:"规则",ok:true}); }   // 已规范则跳过
-    else needAI.push({p,raw}); });
-  mask.innerHTML=`<div class="modal" style="width:min(700px,100%)"><h2>规范出生日期</h2><p class="hint">规则已处理 ${rows.length} 条${needAI.length?(",正用 AI + 万年历 拆 "+needAI.length+" 条难解析项…"):"。"}</p></div>`;
+  // 只处理"非干净ISO"的记录(避免给全部已规范的公历批量加农历);对它们用万年历拆 公历/农历/时辰,缺年的年号才调 AI
+  const todo=[]; state.persons.filter(p=>!p.deleted && (p.birth||"").trim()).forEach(p=>{ const raw=(p.birth||"").trim(); const nd=normalizeDate(raw); if(nd.ok && nd.value===raw) return; todo.push({p,raw}); });
+  const rows=[]; const aiNeed=[...new Set(todo.filter(x=>needsAIDate(x.raw)).map(x=>x.raw))];
+  mask.innerHTML=`<div class="modal" style="width:min(700px,100%)"><h2>规范出生日期</h2><p class="hint">正用万年历拆 ${todo.length} 条${aiNeed.length?(",其中 "+aiNeed.length+" 条年号/民国年调 AI 补年…"):"…"}</p></div>`;
   mask.classList.add("open");
-  if(needAI.length){
-    try{ const res=await aiNormalizeDates(needAI.map(x=>x.raw)); const mp={}; res.forEach(r=>{ mp[r.input]=r; });
-      needAI.forEach(x=>{ const g=mp[x.raw]; const rd=resolveDate(g, x.raw);
-        if(rd.birth||rd.birth_lunar||rd.birth_time){ const patch={}, desc=[];
-          if(rd.birth && rd.birth!==x.raw){ patch.birth=rd.birth; } if(rd.birth) desc.push("公历 "+rd.birth);
-          if(rd.birth_lunar && _messyDate(x.p.birth_lunar)){ patch.birth_lunar=rd.birth_lunar; desc.push("农历 "+rd.birth_lunar); }
-          if(rd.birth_time  && _messyDate(x.p.birth_time)){  patch.birth_time =rd.birth_time;  desc.push("🕐"+rd.birth_time); }
-          if(Object.keys(patch).length) rows.push({p:x.p,raw:x.raw,patch,desc:desc.join(" · "),src:"AI+万年历",ok:true});
-        } else rows.push({p:x.p,raw:x.raw,ok:false}); });
-    }catch(e){ needAI.forEach(x=>rows.push({p:x.p,raw:x.raw,ok:false})); }
-  }
+  const mp={}; if(aiNeed.length){ try{ (await aiNormalizeDates(aiNeed)).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
+  todo.forEach(x=>{ const rd=resolveDate(mp[x.raw], x.raw); const patch={}, desc=[];
+    if(rd.birth && rd.birth!==x.raw){ patch.birth=rd.birth; } if(rd.birth) desc.push("公历 "+rd.birth);
+    if(rd.birth_lunar && _messyDate(x.p.birth_lunar)){ patch.birth_lunar=rd.birth_lunar; desc.push("农历 "+rd.birth_lunar); }
+    if(rd.birth_time  && _messyDate(x.p.birth_time)){  patch.birth_time =rd.birth_time;  desc.push("🕐"+rd.birth_time); }
+    if(Object.keys(patch).length) rows.push({p:x.p,raw:x.raw,patch,desc:desc.join(" · "),src:needsAIDate(x.raw)?"AI+万年历":"万年历",ok:true});
+    else if(!rd.birth) rows.push({p:x.p,raw:x.raw,ok:false}); });
   const good=rows.filter(r=>r.ok), bad=rows.filter(r=>!r.ok);
   const list=good.map((r,i)=>`<label class="mergerow"><input type="checkbox" class="dn" data-i="${i}" checked> <b>${esc(r.p.name||r.p.id)}</b> <span class="hint">「${esc(r.raw)}」→</span> <b style="color:#047857">${esc(r.desc)}</b> <span class="hint">(${esc(r.src)})</span></label>`).join("");
   const badList=bad.map(r=>`<div class="hint" style="color:#b45309;padding:.2rem 0">⚠ <b>${esc(r.p.name||r.p.id)}</b>:「${esc(r.raw)}」无法识别,请手动编辑</div>`).join("");
@@ -1106,10 +1134,12 @@ async function uploadMedia(file){
 }
 
 /* ---------- 关系(通用人际关系):列表 + 增改删 ---------- */
-function personOptions(sel){
-  return state.persons.filter(p=>!p.deleted)
-    .sort((a,b)=>(parseInt(a.gen)||0)-(parseInt(b.gen)||0)||(a.sort_order||0)-(b.sort_order||0))
-    .map(p=>`<option value="${esc(p.id)}"${p.id===sel?" selected":""}>${esc(p.name||"(无名)")} — ${esc(p.id)}</option>`).join("");
+function personOptions(sel, q){
+  q=(q||"").trim().toLowerCase();
+  let list=state.persons.filter(p=>!p.deleted);
+  if(q) list=list.filter(p=>((p.name||"")+" "+(p.alias||"")+" "+p.id).toLowerCase().includes(q));   // 按 姓名/字号/ID 筛
+  list=list.sort((a,b)=>(parseInt(a.gen)||0)-(parseInt(b.gen)||0)||(a.sort_order||0)-(b.sort_order||0)).slice(0,300);
+  return list.map(p=>`<option value="${esc(p.id)}"${p.id===sel?" selected":""}>${esc(p.name||"(无名)")}${p.alias?(" 字"+esc(p.alias)):""} — ${esc(p.id)}</option>`).join("");
 }
 // 「关系」标签已移除;关系的增/删/改收归到人物详情页(见 openDetail)。personOptions/relOptions 仍复用。
 
@@ -1201,6 +1231,12 @@ const ROSTER_COLS = [
 const ROSTER_DEFAULT = ["name","gen","char_gen","sex","alive","birth","death","occupation","company","lineage"];
 function rosterCols(){ try{ const s=JSON.parse(localStorage.getItem("roster_cols")||"null"); if(Array.isArray(s)&&s.length) return s; }catch(e){} return ROSTER_DEFAULT.slice(); }
 let _rosterSort={k:"gen",dir:1}, _colpickOpen=false;
+/* ---------- 搜索历史(最近搜索词,存本地 localStorage)---------- */
+function recentSearches(){ try{ const a=JSON.parse(localStorage.getItem("search_recent")||"[]"); return Array.isArray(a)?a.filter(x=>typeof x==="string"&&x.trim()).slice(0,12):[]; }catch(e){ return []; } }
+function pushRecentSearch(term){ term=(term||"").trim(); if(term.length<1) return; try{ const a=recentSearches().filter(x=>x!==term); a.unshift(term); localStorage.setItem("search_recent", JSON.stringify(a.slice(0,12))); }catch(e){} }
+function clearRecentSearches(){ try{ localStorage.removeItem("search_recent"); }catch(e){} }
+let _searchRecTimer=null;
+function recordSearchDebounced(){ clearTimeout(_searchRecTimer); _searchRecTimer=setTimeout(()=>{ pushRecentSearch(state.q); }, 1200); }   // 停止输入 1.2s 后记一条(避免记下半截词)
 function cellVal(p,k){ return k==="rel_count"?(state.relCount[p.id]||0):(k==="gen"?(genOf(p.id)??""):(k==="lineage"?familiesOf(p.id).join(" / "):(p[k]==null?"":p[k]))); }
 function renderRoster(){
   const box=$("#rosterBox"); if(!box) return;
@@ -1222,15 +1258,21 @@ function renderRoster(){
     +`<input id="rosterSearch" type="text" placeholder="🔍 搜索姓名/字号/备注…" value="${esc(state.q||"")}" style="min-width:11em;flex:0 1 16em">`
     +`${cfRows}<button class="btn btn-sm" id="cfAdd">+ 字段筛选</button>`
     +`<span class="hint">${list.length} 人</span>${hasFilter?`<button class="btn btn-sm" id="cfClear">清除</button>`:""}</div>`;
+  // 最近搜索词(点一下重搜);不重复显示当前正在搜的词
+  const recent=recentSearches().filter(t=>t!==(state.q||"").trim());
+  const recentRow=recent.length?`<div class="recentsearch" style="display:flex;gap:.3rem;flex-wrap:wrap;align-items:center;margin:-.15rem 0 .5rem"><span class="hint">最近搜索:</span>${recent.map(t=>`<button class="btn btn-sm rs-chip" data-q="${esc(t)}">${esc(t)}</button>`).join("")}<button class="btn btn-sm rs-clear" title="清空搜索历史">🗑 清空</button></div>`:"";
   const thead="<tr>"+orderedCols.map(c=>`<th data-sk="${c.k}">${esc(c.label)}${sk===c.k?(dir>0?" ▲":" ▼"):""}</th>`).join("")+"</tr>";
   const rows=list.map(p=>`<tr data-pid="${esc(p.id)}">`+orderedCols.map(c=>`<td>${esc(String(cellVal(p,c.k)))}</td>`).join("")+`</tr>`).join("");
-  box.innerHTML=bar+filterRow+`<div class="rostertable"><table class="roster"><thead>${thead}</thead><tbody>${rows||""}</tbody></table></div>`;
+  box.innerHTML=bar+filterRow+recentRow+`<div class="rostertable"><table class="roster"><thead>${thead}</thead><tbody>${rows||""}</tbody></table></div>`;
   const dt=box.querySelector(".colpick"); if(dt) dt.ontoggle=e=>{ _colpickOpen=e.target.open; };
   box.querySelectorAll(".colpick input[type=checkbox]").forEach(cb=>cb.onchange=()=>{
     const cur=new Set(rosterCols()); cb.checked?cur.add(cb.dataset.col):cur.delete(cb.dataset.col);
     localStorage.setItem("roster_cols", JSON.stringify(ROSTER_COLS.filter(c=>cur.has(c.k)).map(c=>c.k))); renderRoster(); });
   const refocus=sel=>{ const e2=document.querySelector(sel); if(e2){ const v=e2.value; e2.focus(); try{e2.setSelectionRange(v.length,v.length);}catch(_){} } };
-  { const rs=$("#rosterSearch"); if(rs) rs.oninput=()=>{ state.q=rs.value; const top=$("#search"); if(top)top.value=rs.value; renderRoster(); refocus("#rosterSearch"); }; }
+  { const rs=$("#rosterSearch"); if(rs){ rs.oninput=()=>{ state.q=rs.value; const top=$("#search"); if(top)top.value=rs.value; renderRoster(); refocus("#rosterSearch"); recordSearchDebounced(); };
+      rs.onkeydown=e=>{ if(e.key==="Enter"){ pushRecentSearch(rs.value); renderRoster(); refocus("#rosterSearch"); } }; } }
+  box.querySelectorAll(".rs-chip").forEach(b=>b.onclick=()=>{ state.q=b.dataset.q; const top=$("#search"); if(top)top.value=state.q; pushRecentSearch(state.q); renderRoster(); });
+  { const rc=box.querySelector(".rs-clear"); if(rc) rc.onclick=()=>{ clearRecentSearches(); renderRoster(); }; }
   box.querySelectorAll(".cf-field").forEach(s=>s.onchange=()=>{ state.customFilters[+s.dataset.i].field=s.value; renderRoster(); });
   box.querySelectorAll(".cf-op").forEach(s=>s.onchange=()=>{ state.customFilters[+s.dataset.i].op=s.value; renderRoster(); });
   box.querySelectorAll(".cf-val").forEach(inp=>inp.oninput=()=>{ const i=+inp.dataset.i; state.customFilters[i].val=inp.value; renderRoster(); refocus('.cf-val[data-i="'+i+'"]'); });
@@ -1319,17 +1361,14 @@ function matchIncoming(inc){
 async function buildPreviewFromIncoming(incList){
   const list=incList.filter(inc=>(inc.name||"").trim());
   const aiNeed=new Set();
-  list.forEach(inc=>{ const b=(inc.birth||"").trim(); if(!b) return; const nd=normalizeDate(b); if(nd.ok&&nd.value){ inc.birth=nd.value; } else { inc._braw=b; aiNeed.add(b); } });
-  if(aiNeed.size){
-    let res=[]; try{ res=await aiNormalizeDates([...aiNeed]); }catch(e){}
-    const mp={}; res.forEach(r=>{ if(r&&r.input) mp[r.input]=r; });
-    const messy = s => !(s||"").trim() || /\d{4}|时|分/.test(s);   // 空 或 含年/时=DeepSeek 原串,可被万年历清洗版覆盖
-    list.forEach(inc=>{ if(!inc._braw) return; const g=mp[inc._braw]; const rd=resolveDate(g, inc._braw);
-      inc.birth = rd.birth || inc._braw;                                   // 公历(识别不出保留原文)
-      if(rd.birth_lunar && messy(inc.birth_lunar)) inc.birth_lunar=rd.birth_lunar;   // 农历(清洗版覆盖原始串)
-      if(rd.birth_time  && messy(inc.birth_time))  inc.birth_time =rd.birth_time;    // 时辰
-      delete inc._braw; });
-  }
+  list.forEach(inc=>{ const b=(inc.birth||"").trim(); if(!b) return; inc._braw=b; if(needsAIDate(b)) aiNeed.add(b); });   // 全部走 resolveDate;只有缺年(年号)等才调 AI
+  const mp={}; if(aiNeed.size){ try{ (await aiNormalizeDates([...aiNeed])).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
+  const messy = s => !(s||"").trim() || /\d{4}|时|分/.test(s);   // 空 或 含年/时=未拆原串,可被万年历清洗版覆盖
+  list.forEach(inc=>{ if(!inc._braw) return; const rd=resolveDate(mp[inc._braw], inc._braw);
+    if(rd.birth) inc.birth=rd.birth; else inc.birth=inc._braw;                       // 公历(认不出保留原文)
+    if(rd.birth_lunar && messy(inc.birth_lunar)) inc.birth_lunar=rd.birth_lunar;      // 农历(双向补齐)
+    if(rd.birth_time  && messy(inc.birth_time))  inc.birth_time =rd.birth_time;       // 时辰
+    delete inc._braw; });
   _imp.preview = list.map(matchIncoming);
 }
 function buildImportPreview(){
@@ -1428,11 +1467,11 @@ async function aiCreateAll(){
   if(!valid.length){ alert("没有可创建的人物(需姓名,且未勾「跳过」)"); return; }
   if(!confirm("将创建 "+valid.length+" 个人物(状态=待考)"+(skipped?(",跳过 "+skipped+" 条疑似重复"):"")+"?")) return;
   const btn=$("#aiCreateAll"); btn.disabled=true; btn.textContent="识别日期+创建中…";
-  // 先把复杂出生日期(农历/年号/带时辰)用 AI+万年历 拆成 公历/农历/时辰
-  const need=new Set(); valid.forEach(d=>{ const b=(d.birth||"").trim(); if(!b) return; const nd=normalizeDate(b); if(nd.ok&&nd.value){ d.birth=nd.value; } else { d._braw=b; need.add(b); } });
-  if(need.size){ try{ const res=await aiNormalizeDates([...need]); const mp={}; res.forEach(r=>{ if(r&&r.input) mp[r.input]=r; });
-    valid.forEach(d=>{ if(!d._braw) return; const g=mp[d._braw]; const rd=resolveDate(g, d._braw);
-      d.birth=rd.birth||d._braw; if(rd.birth_lunar&&_messyDate(d.birth_lunar))d.birth_lunar=rd.birth_lunar; if(rd.birth_time&&_messyDate(d.birth_time))d.birth_time=rd.birth_time; delete d._braw; }); }catch(e){} }
+  // 出生日期统一走万年历拆 公历/农历/时辰(客户端优先,只有年号/民国年缺年才调 AI)
+  const need=new Set(); valid.forEach(d=>{ const b=(d.birth||"").trim(); if(!b) return; d._braw=b; if(needsAIDate(b)) need.add(b); });
+  const mp={}; if(need.size){ try{ (await aiNormalizeDates([...need])).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
+  valid.forEach(d=>{ if(!d._braw) return; const rd=resolveDate(mp[d._braw], d._braw);
+    if(rd.birth)d.birth=rd.birth; if(rd.birth_lunar&&_messyDate(d.birth_lunar))d.birth_lunar=rd.birth_lunar; if(rd.birth_time&&_messyDate(d.birth_time))d.birth_time=rd.birth_time; delete d._braw; });
   let ok=0, fail=0;
   for(const d of valid){ try{ await api("POST","/api/persons",{ ...d, status:"待考" }); ok++; }catch(e){ fail++; } }
   btn.textContent="全部新建为人物";
@@ -1610,7 +1649,8 @@ function switchView(name){
   if(name==="log"){ renderBackup(); renderLog(); }
 }
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchView(t.dataset.view));
-$("#search").oninput=e=>{ state.q=e.target.value; renderPeople(); };
+$("#search").oninput=e=>{ state.q=e.target.value; renderPeople(); recordSearchDebounced(); };
+$("#search").onkeydown=e=>{ if(e.key==="Enter"){ pushRecentSearch($("#search").value); renderPeople(); } };
 $("#shareMode").onchange=e=>{ state.share=e.target.checked; renderPeople(); };
 $("#addBtn").onclick=()=>openEdit(null);
 $("#saveBtn").onclick=saveModal;
