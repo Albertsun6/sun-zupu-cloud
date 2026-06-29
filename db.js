@@ -402,7 +402,7 @@ async function exportGedcom(){
   const xref={}; rows.forEach((r,i)=>xref[r.id]="@I"+(i+1)+"@");
   const fams={}; rows.forEach(r=>{ const f=r.father_id; if(f&&by[f]) (fams[f]=fams[f]||[]).push(r.id); });
   const fx={}; Object.keys(fams).forEach((f,i)=>fx[f]="@F"+(i+1)+"@"); const foc={}; Object.entries(fams).forEach(([f,ks])=>ks.forEach(k=>foc[k]=f));
-  const L=["0 HEAD","1 SOUR 谱系(人物关系图谱)","1 GEDC","2 VERS 5.5.1","2 FORM LINEAGE-LINKED","1 CHAR UTF-8"];
+  const L=["0 HEAD","1 SOUR 关系图谱(人物关系图谱)","1 GEDC","2 VERS 5.5.1","2 FORM LINEAGE-LINKED","1 CHAR UTF-8"];
   rows.forEach(r=>{ const pid=r.id; L.push("0 "+xref[pid]+" INDI");
     const nm=r.name||"", sur=nm.startsWith("孙")?"孙":"", giv=sur?nm.slice(sur.length):nm;
     L.push("1 NAME "+giv+" /"+sur+"/"); L.push("1 SEX "+(r.sex==="男"?"M":r.sex==="女"?"F":"U"));

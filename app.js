@@ -34,8 +34,8 @@ function _renderLightbox(){
   if(multi){ m.querySelector(".lb-prev").onclick=e=>{e.stopPropagation();_lbStep(-1);}; m.querySelector(".lb-next").onclick=e=>{e.stopPropagation();_lbStep(1);}; }
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
-const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.16.1";
+const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
+const APP_VERSION = "v0.17.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -131,7 +131,7 @@ function renderAuthBar(){       // 显示当前登录者 + 角色;viewer 隐藏�
 }
 function renderHeader(){
   const m=state.meta||{};
-  // 品牌名固定=谱系;副标题=当前这本谱(meta.title)+ 地望,不让数据顶掉品牌名
+  // 品牌名固定=关系图谱;副标题=当前这本谱/库(meta.title)+ 地望,不让数据顶掉品牌名
   $("#subtitle").textContent=(m.title?("· "+m.title):"")+(m.lineage?("  "+m.lineage):"");
   const total=state.persons.length, alive=state.persons.filter(p=>p.alive==="是").length;
   const todo=state.verify.filter(v=>!/已?确认/.test(v.status||"")).length;

@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>谱系 · 人物关系图谱</title>
-<meta name="application-name" content="谱系"/>
+<title>关系图谱 · 人物与人际关系</title>
+<meta name="application-name" content="关系图谱"/>
 <meta name="theme-color" content="#047857"/>
-<meta property="og:title" content="谱系 · 人物关系图谱"/>
+<meta property="og:title" content="关系图谱 · 人物与人际关系"/>
 <meta property="og:description" content="从家谱到人脉,一图记清每个人和每段关系。"/>
 <link rel="icon" href="data:,"/>
 <link rel="manifest" href="manifest.webmanifest"/>
@@ -16,7 +16,7 @@
 
 <header>
   <div class="bar">
-    <div class="title" id="title">谱系 <small id="subtitle"></small> <small class="ver" id="appVer"></small></div>
+    <div class="title" id="title">关系图谱 <small id="subtitle"></small> <small class="ver" id="appVer"></small></div>
     <div class="stats" id="stats"></div>
     <div class="spacer"></div>
     <input class="search" id="search" type="text" placeholder="搜索姓名/字号/备注…"/>
@@ -106,8 +106,8 @@
 <!-- 登录浮层 -->
 <div class="mask" id="loginMask">
   <div class="modal login">
-    <h2>谱系</h2>
-    <p class="hint" style="margin:-.6rem 0 1rem">人物关系图谱 · 从家谱到人脉,一图记清每个人和每段关系</p>
+    <h2>关系图谱</h2>
+    <p class="hint" style="margin:-.6rem 0 1rem">人物 + 人际关系图谱 · 一图记清每个人和每段关系</p>
     <div class="field"><label for="loginEmail">邮箱</label><input type="email" id="loginEmail" autocomplete="username" placeholder="you@example.com"/></div>
     <div class="field"><label for="loginPw">密码</label><input type="password" id="loginPw" autocomplete="current-password"/></div>
     <div class="err" id="loginErr"></div>
@@ -158,9 +158,9 @@
         <div class="field"><label for="f_status">状态</label><select id="f_status"><option>确认</option><option>存疑</option><option>待考</option><option>待补</option></select></div>
       </div>
     </div>
-    <!-- ② 谱系 / 关系 -->
+    <!-- ② 世系 / 关系 -->
     <div class="formsec">
-      <div class="formsec-h">② 谱系 · 关系</div>
+      <div class="formsec-h">② 世系 · 关系</div>
       <div class="grid2">
         <div class="field full"><label for="f_father_id">父亲(从已有人物选 · 自动建立父子关系)</label><select id="f_father_id"></select></div>
         <div class="field full" id="initRelWrap" style="display:none">
@@ -267,9 +267,9 @@
 </div>
 
 <!-- ?v= 随版本递增,确保部署后浏览器加载最新代码(改版本时同步改这里) -->
-<script src="config.js?v=0.16.1"></script>
-<script type="module" src="db.js?v=0.16.1"></script>
-<script type="module" src="app.js?v=0.16.1"></script>
-<script type="module" src="calendar.js?v=0.16.1"></script>
+<script src="config.js?v=0.17.0"></script>
+<script type="module" src="db.js?v=0.17.0"></script>
+<script type="module" src="app.js?v=0.17.0"></script>
+<script type="module" src="calendar.js?v=0.17.0"></script>
 </body>
 </html>
