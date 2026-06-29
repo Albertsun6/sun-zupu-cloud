@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.20.2";
+const APP_VERSION = "v0.21.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -927,6 +927,18 @@ async function aiNormalizeDates(list){
   const r=await fetch("/api/normalize-dates",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({dates:list}) });
   const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j.results||[];
 }
+// 把 AI 拆出的结构化字段 → {birth(公历) / birth_lunar(农历) / birth_time(时辰)},农历↔公历用万年历(lunar-javascript)精确换算
+function resolveDate(r){
+  const out={birth:"",birth_lunar:"",birth_time:""}, p2=n=>String(n).padStart(2,"0"), LC=window.LUNARCONV;
+  if(r.time){ const m=String(r.time).match(/^(\d{1,2}):(\d{1,2})$/); if(m && +m[1]<=23 && LC){ out.birth_time=`${+m[1]}:${p2(+m[2])} ${LC.shichenOf(+m[1])}`; } else out.birth_time=String(r.time); }
+  const y=r.year, m=r.month, d=r.day; if(!y) return out;
+  if(r.is_lunar){
+    if(m&&d&&LC&&LC.ready){ const c=LC.lunarToSolar(y,m,d,!!r.leap); if(c){ out.birth=c.solar; out.birth_lunar=c.lunar; return out; } }
+    out.birth=String(y); out.birth_lunar=(m&&d)?`农历${m}月${d}日`:"";   // 转换失败/缺月日:只能给年
+  } else if(m&&d){ out.birth=`${y}-${p2(m)}-${p2(d)}`; if(LC&&LC.ready){ const c=LC.solarToLunar(y,m,d); if(c) out.birth_lunar=c.lunar; } }
+  else if(m){ out.birth=`${y}-${p2(m)}`; } else out.birth=String(y);
+  return out;
+}
 // 表单失焦即时规范:规则能认就直接规范;认不出调 AI;再认不出黄字提示
 async function onBirthBlur(){
   const inp=$("#f_birth"), hint=$("#birthHint"); if(!inp) return; const raw=inp.value.trim();
@@ -934,32 +946,42 @@ async function onBirthBlur(){
   const r=normalizeDate(raw);
   if(r.ok){ if(r.value&&r.value!==raw){ inp.value=r.value; if(hint){ hint.textContent="已规范"; hint.style.color="#047857"; } } else if(hint){ hint.textContent=""; } return; }
   if(hint){ hint.textContent="识别中…"; hint.style.color="#64748b"; }
-  try{ const g=(await aiNormalizeDates([raw]))[0];
-    if(g&&g.ok&&g.value){ inp.value=g.value; if(hint){ hint.textContent="AI识别"+(g.note?"("+g.note+")":""); hint.style.color="#047857"; } }
+  try{ const g=(await aiNormalizeDates([raw]))[0]; const rd=g?resolveDate(g):null;
+    if(rd&&rd.birth){ inp.value=rd.birth;
+      const lf=$("#f_birth_lunar"); if(lf&&rd.birth_lunar&&!lf.value.trim()) lf.value=rd.birth_lunar;
+      const tf=$("#f_birth_time");  if(tf&&rd.birth_time &&!tf.value.trim()) tf.value=rd.birth_time;
+      if(hint){ hint.textContent="已按万年历拆为 公历/农历/时辰"; hint.style.color="#047857"; } }
     else if(hint){ hint.textContent="⚠无法识别,请填 年/年-月/年-月-日"; hint.style.color="#b45309"; }
   }catch(e){ if(hint){ hint.textContent="识别失败:"+e.message; hint.style.color="#b45309"; } }
 }
 // 批量规范:扫全部 birth → 规则 + AI兜底 → 预览(原→新,不识别标红)→ 勾选确认才改(可撤销)
+const _messyDate = s => !(s||"").trim() || /\d{4}|时|分/.test(s);   // 空 或 含年/时=未拆的原始串,可被万年历清洗版覆盖
 async function openDateNormalizer(){
   let mask=$("#dateNormMask"); if(!mask){ mask=el("div","mask"); mask.id="dateNormMask"; document.body.appendChild(mask); }
   const people=state.persons.filter(p=>!p.deleted && (p.birth||"").trim());
   const rows=[], needAI=[];
   people.forEach(p=>{ const raw=(p.birth||"").trim(); const r=normalizeDate(raw);
-    if(r.ok){ if(r.value!==raw) rows.push({p,raw,value:r.value,src:"规则",ok:true}); }   // 相同=已规范,跳过
+    if(r.ok){ if(r.value!==raw) rows.push({p,raw,patch:{birth:r.value},desc:r.value,src:"规则",ok:true}); }   // 已规范则跳过
     else needAI.push({p,raw}); });
-  mask.innerHTML=`<div class="modal" style="width:min(680px,100%)"><h2>规范出生日期</h2><p class="hint">规则已处理 ${rows.length} 条${needAI.length?(",正用 AI 识别 "+needAI.length+" 条难解析项…"):"。"}</p></div>`;
+  mask.innerHTML=`<div class="modal" style="width:min(700px,100%)"><h2>规范出生日期</h2><p class="hint">规则已处理 ${rows.length} 条${needAI.length?(",正用 AI + 万年历 拆 "+needAI.length+" 条难解析项…"):"。"}</p></div>`;
   mask.classList.add("open");
   if(needAI.length){
     try{ const res=await aiNormalizeDates(needAI.map(x=>x.raw)); const mp={}; res.forEach(r=>{ mp[r.input]=r; });
-      needAI.forEach(x=>{ const g=mp[x.raw]||{}; if(g.ok&&g.value&&g.value!==x.raw) rows.push({p:x.p,raw:x.raw,value:g.value,src:"AI"+(g.note?"·"+g.note:""),ok:true}); else rows.push({p:x.p,raw:x.raw,value:"",src:"AI",ok:false}); });
-    }catch(e){ needAI.forEach(x=>rows.push({p:x.p,raw:x.raw,value:"",src:"AI失败",ok:false})); }
+      needAI.forEach(x=>{ const g=mp[x.raw]; const rd=g?resolveDate(g):null;
+        if(rd&&rd.birth){ const patch={}, desc=[];
+          if(rd.birth!==x.raw){ patch.birth=rd.birth; } desc.push("公历 "+rd.birth);
+          if(rd.birth_lunar && _messyDate(x.p.birth_lunar)){ patch.birth_lunar=rd.birth_lunar; desc.push("农历 "+rd.birth_lunar); }
+          if(rd.birth_time  && _messyDate(x.p.birth_time)){  patch.birth_time =rd.birth_time;  desc.push("🕐"+rd.birth_time); }
+          if(Object.keys(patch).length) rows.push({p:x.p,raw:x.raw,patch,desc:desc.join(" · "),src:"AI+万年历",ok:true});
+        } else rows.push({p:x.p,raw:x.raw,ok:false}); });
+    }catch(e){ needAI.forEach(x=>rows.push({p:x.p,raw:x.raw,ok:false})); }
   }
   const good=rows.filter(r=>r.ok), bad=rows.filter(r=>!r.ok);
-  const list=good.map((r,i)=>`<label class="mergerow"><input type="checkbox" class="dn" data-i="${i}" checked> <b>${esc(r.p.name||r.p.id)}</b> <span class="hint">「${esc(r.raw)}」→</span> <b style="color:#047857">${esc(r.value)}</b> <span class="hint">(${esc(r.src)})</span></label>`).join("");
-  const badList=bad.map(r=>`<div class="hint" style="color:#b45309;padding:.2rem 0">⚠ <b>${esc(r.p.name||r.p.id)}</b>:「${esc(r.raw)}」无法识别,请手动到该人物编辑</div>`).join("");
-  mask.innerHTML=`<div class="modal" style="width:min(680px,100%)">
+  const list=good.map((r,i)=>`<label class="mergerow"><input type="checkbox" class="dn" data-i="${i}" checked> <b>${esc(r.p.name||r.p.id)}</b> <span class="hint">「${esc(r.raw)}」→</span> <b style="color:#047857">${esc(r.desc)}</b> <span class="hint">(${esc(r.src)})</span></label>`).join("");
+  const badList=bad.map(r=>`<div class="hint" style="color:#b45309;padding:.2rem 0">⚠ <b>${esc(r.p.name||r.p.id)}</b>:「${esc(r.raw)}」无法识别,请手动编辑</div>`).join("");
+  mask.innerHTML=`<div class="modal" style="width:min(700px,100%)">
     <h2>规范出生日期 <span class="pill pill-info">${good.length}</span></h2>
-    <p class="hint">统一成 年 / 年-月 / 年-月-日(可缺)。逐条核对,取消勾选不对的,确认后改(可在操作历史撤销)。${bad.length?(" 有 "+bad.length+" 条无法识别,已标红、需手动。"):""}</p>
+    <p class="hint">拆成 公历出生日期 / 农历生辰 / 出生时辰(农历↔公历用万年历精确换算)。逐条核对,取消勾选不对的,确认后改(可撤销)。${bad.length?(" 有 "+bad.length+" 条无法识别,已标红、需手动。"):""}</p>
     <div style="max-height:52vh;overflow:auto">${list||'<div class="hint">没有需要规范的(都已是标准格式)。</div>'}${badList}</div>
     <div class="modal-foot">${good.length?`<label class="hint"><input type="checkbox" id="dnAll" checked> 全选</label>`:""}<span class="spacer"></span><button class="btn" id="dnCancel">关闭</button>${good.length?`<button class="btn btn-primary" id="dnOk">应用所选</button>`:""}</div>
   </div>`;
@@ -968,7 +990,7 @@ async function openDateNormalizer(){
   const dnOk=$("#dnOk"); if(dnOk) dnOk.onclick=async()=>{
     const picks=[...mask.querySelectorAll(".dn:checked")].map(c=>good[+c.dataset.i]); if(!picks.length){ mask.classList.remove("open"); return; }
     dnOk.disabled=true; dnOk.textContent="应用中…"; let ok=0; const fails=[];
-    for(const r of picks){ try{ await api("PUT","/api/persons/"+encodeURIComponent(r.p.id),{birth:r.value}); ok++; }catch(e){ fails.push((r.p.name||r.p.id)+":"+e.message); } }
+    for(const r of picks){ try{ await api("PUT","/api/persons/"+encodeURIComponent(r.p.id),r.patch); ok++; }catch(e){ fails.push((r.p.name||r.p.id)+":"+e.message); } }
     mask.classList.remove("open"); await reloadPersons(); await refreshRelCount(); renderHeader(); renderPeople(); renderHealth();
     if(fails.length) alert("已规范 "+ok+" 条,失败 "+fails.length+":\n"+fails.join("\n"));
   };
@@ -1272,10 +1294,11 @@ async function buildPreviewFromIncoming(incList){
   if(aiNeed.size){
     let res=[]; try{ res=await aiNormalizeDates([...aiNeed]); }catch(e){}
     const mp={}; res.forEach(r=>{ if(r&&r.input) mp[r.input]=r; });
-    list.forEach(inc=>{ if(!inc._braw) return; const g=mp[inc._braw]||{};
-      inc.birth = g.value || inc._braw;                                   // 识别不出保留原文
-      if(g.lunar && !(inc.birth_lunar||"").trim()) inc.birth_lunar=g.lunar;   // 农历生辰
-      if(g.time  && !(inc.birth_time ||"").trim()) inc.birth_time =g.time;    // 出生时间(时辰)
+    const messy = s => !(s||"").trim() || /\d{4}|时|分/.test(s);   // 空 或 含年/时=DeepSeek 原串,可被万年历清洗版覆盖
+    list.forEach(inc=>{ if(!inc._braw) return; const g=mp[inc._braw]; const rd=g?resolveDate(g):null;
+      inc.birth = (rd&&rd.birth) || inc._braw;                              // 公历(识别不出保留原文)
+      if(rd&&rd.birth_lunar && messy(inc.birth_lunar)) inc.birth_lunar=rd.birth_lunar;   // 农历(清洗版覆盖原始串)
+      if(rd&&rd.birth_time  && messy(inc.birth_time))  inc.birth_time =rd.birth_time;    // 时辰
       delete inc._braw; });
   }
   _imp.preview = list.map(matchIncoming);
@@ -1375,8 +1398,15 @@ async function aiCreateAll(){
   const skipped=_aiDrafts.filter(d=>(d.name||"").trim() && d._skip).length;
   if(!valid.length){ alert("没有可创建的人物(需姓名,且未勾「跳过」)"); return; }
   if(!confirm("将创建 "+valid.length+" 个人物(状态=待考)"+(skipped?(",跳过 "+skipped+" 条疑似重复"):"")+"?")) return;
-  const btn=$("#aiCreateAll"); btn.disabled=true; let ok=0, fail=0;
+  const btn=$("#aiCreateAll"); btn.disabled=true; btn.textContent="识别日期+创建中…";
+  // 先把复杂出生日期(农历/年号/带时辰)用 AI+万年历 拆成 公历/农历/时辰
+  const need=new Set(); valid.forEach(d=>{ const b=(d.birth||"").trim(); if(!b) return; const nd=normalizeDate(b); if(nd.ok&&nd.value){ d.birth=nd.value; } else { d._braw=b; need.add(b); } });
+  if(need.size){ try{ const res=await aiNormalizeDates([...need]); const mp={}; res.forEach(r=>{ if(r&&r.input) mp[r.input]=r; });
+    valid.forEach(d=>{ if(!d._braw) return; const g=mp[d._braw]; const rd=g?resolveDate(g):null;
+      d.birth=(rd&&rd.birth)||d._braw; if(rd&&rd.birth_lunar&&_messyDate(d.birth_lunar))d.birth_lunar=rd.birth_lunar; if(rd&&rd.birth_time&&_messyDate(d.birth_time))d.birth_time=rd.birth_time; delete d._braw; }); }catch(e){} }
+  let ok=0, fail=0;
   for(const d of valid){ try{ await api("POST","/api/persons",{ ...d, status:"待考" }); ok++; }catch(e){ fail++; } }
+  btn.textContent="全部新建为人物";
   btn.disabled=false;
   await reloadPersons(); renderPeople(); renderHeader();
   $("#aiMsg").textContent=`已创建 ${ok} 人${fail?(",失败 "+fail):""}`;

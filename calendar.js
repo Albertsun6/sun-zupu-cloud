@@ -12,6 +12,18 @@ const pad = n => String(n).padStart(2, "0");
 const FIELDS = { birth: ["f_birth", "f_birth_lunar"], death: ["f_death", "f_death_lunar"] };
 let targetEv = "birth";
 
+// 暴露万年历换算给 app.js(导入/AI识别时把农历↔公历精确互转,而非靠 AI 猜)
+const _shichen12 = ["子","丑","寅","卯","辰","巳","午","未","申","酉","戌","亥"];
+const _shichenOf = h => _shichen12[Math.floor(((h + 1) % 24) / 2)] + "时";
+window.LUNARCONV = {
+  get ready(){ return !!Solar; },
+  shichenOf: _shichenOf,
+  lunarToSolar(y, m, d, leap){ try { const lo = Lunar.fromYmd(y, leap ? -m : m, d), so = lo.getSolar();
+    return { solar: `${so.getYear()}-${pad(so.getMonth())}-${pad(so.getDay())}`, lunar: `农历${lo.getMonthInChinese()}月${lo.getDayInChinese()}`, gz: lo.getYearInGanZhi() }; } catch (e) { return null; } },
+  solarToLunar(y, m, d){ try { const lu = Solar.fromYmd(y, m, d).getLunar();
+    return { solar: `${y}-${pad(m)}-${pad(d)}`, lunar: `农历${lu.getMonthInChinese()}月${lu.getDayInChinese()}`, gz: lu.getYearInGanZhi() }; } catch (e) { return null; } }
+};
+
 const mask = document.createElement("div");
 mask.className = "mask"; mask.id = "calMask";
 mask.innerHTML = `
