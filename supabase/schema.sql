@@ -26,6 +26,7 @@ create table if not exists public.persons (
   mother        text default '',
   spouse        text default '',
   occupation    text default '',
+  company       text default '',     -- 公司/单位(v0.19+,关系图谱通用属性)
   residence     text default '',
   burial        text default '',
   contact       text default '',     -- 敏感
@@ -41,6 +42,8 @@ create table if not exists public.persons (
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
+-- 已建库的现网:补列(幂等)。v0.19+ 公司字段。
+alter table public.persons add column if not exists company text default '';
 create index if not exists persons_father_idx  on public.persons(father_id);
 create index if not exists persons_deleted_idx on public.persons(deleted);
 

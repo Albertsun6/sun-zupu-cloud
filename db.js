@@ -16,7 +16,7 @@ window.sb = sb;
 
 const EDITABLE = ["gen","char_gen","name","alias","sex","birth","birth_lunar","birth_time","birth_place",
   "death","death_lunar","alive","rank","relation_type","kind","father_id","father_note","mother",
-  "spouse","occupation","residence","burial","contact","address","deeds","source","status","note"];
+  "spouse","occupation","company","residence","burial","contact","address","deeds","source","status","note"];
 const MARRIAGE_FIELDS = ["spouse","spouse_family","marriage_year","relation","note"];
 const BUCKET = "photos";
 const dec = decodeURIComponent;
@@ -355,7 +355,7 @@ function download(filename, content, mime){
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 }
 function csvCell(s){ s=(s==null?"":String(s)); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }
-const CSV_COLS=["id","gen","char_gen","name","alias","sex","birth","birth_lunar","birth_time","birth_place","death","death_lunar","alive","rank","relation_type","kind","father_id","father_note","mother","spouse","occupation","residence","burial","contact","address","deeds","source","status","note","photo"];
+const CSV_COLS=["id","gen","char_gen","name","alias","sex","birth","birth_lunar","birth_time","birth_place","death","death_lunar","alive","rank","relation_type","kind","father_id","father_note","mother","spouse","occupation","company","residence","burial","contact","address","deeds","source","status","note","photo"];
 const CSV_HEAD=["ID","世代","字辈","姓名","字号","性别","生年","农历生","出生时辰","出生地","卒年/享年","农历卒","在世","行第","亲属关系","本族/外部","父ID","父系说明","母","配偶","学历/职业/功名","居地/迁徙","葬地","联系方式","现住址","事迹","资料来源","状态","备注","主照片"];
 function marrSummary(list){ return (list||[]).map(m=>{ let s=m.spouse||""; const ex=[m.relation, m.spouse_family&&("父家:"+m.spouse_family), m.marriage_year&&("婚配:"+m.marriage_year)].filter(Boolean); if(ex.length)s+="("+ex.join("·")+")"; return s; }).filter(Boolean).join("; "); }
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));

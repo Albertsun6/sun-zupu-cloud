@@ -35,14 +35,14 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.19.0";
+const APP_VERSION = "v0.19.1";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
 // L1 节点=纯个人属性。世代(派生)/本族外部/行第/亲属关系/母/父系说明/配偶 已退出表单(关系→边层,世代→推算)。
 const FORM_KEYS = ["id","name","char_gen","alias","sex","birth",
   "birth_lunar","birth_time","death","death_lunar","birth_place","burial","alive",
-  "occupation","residence","contact","address","deeds","source","status","note"];
+  "occupation","company","residence","contact","address","deeds","source","status","note"];
 const DIRECT_LINE = new Set(["S001","S002","S004","S008","S010","S014","S019","S033","S046"]);
 const ORIG_IMG = {p1:window.photoUrl("yuanpu/p1.jpg"),p2:window.photoUrl("yuanpu/p2.jpg"),p3:window.photoUrl("yuanpu/p3.jpg"),p4:window.photoUrl("yuanpu/p4.jpg")};
 const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media","create:relationship"]);
@@ -579,7 +579,7 @@ async function openDetail(p){
   R("出生日期", [p.birth, p.birth_lunar&&("农历 "+p.birth_lunar), p.birth_time].filter(Boolean).join(" · "));
   R("出生地", p.birth_place);
   if(p.alive==="否"){ R("卒", [p.death, p.death_lunar&&("农历 "+p.death_lunar)].filter(Boolean).join(" · ")); R("葬地", p.burial); }   // 卒/葬仅在「已故」时显示
-  R("字号", p.alias); R("性别", p.sex); R("学历/职业", p.occupation); R("居地/迁徙", p.residence);
+  R("字号", p.alias); R("性别", p.sex); R("学历/职业", p.occupation); R("公司", p.company); R("居地/迁徙", p.residence);
   if(rows.length) html+=`<div class="dgrid">${rows.join("")}</div>`;
   // 关系(父/母/配偶/子女/社交…)统一收到下方「关系网」列表;上方只留个人信息 + 直系链
   if(p.contact||p.address){
@@ -1143,11 +1143,11 @@ const ROSTER_COLS = [
   {k:"name",label:"姓名"},{k:"gen",label:"世代"},{k:"char_gen",label:"字辈"},
   {k:"sex",label:"性别"},{k:"alive",label:"在世"},{k:"rel_count",label:"关系数"},{k:"lineage",label:"族谱"},
   {k:"birth",label:"出生日期"},{k:"birth_lunar",label:"农历生"},{k:"birth_time",label:"出生时间"},{k:"death",label:"卒年"},
-  {k:"birth_place",label:"出生地"},{k:"occupation",label:"学历/职业"},{k:"residence",label:"居地"},{k:"burial",label:"葬地"},
+  {k:"birth_place",label:"出生地"},{k:"occupation",label:"学历/职业"},{k:"company",label:"公司"},{k:"residence",label:"居地"},{k:"burial",label:"葬地"},
   {k:"spouse",label:"配偶(原始记载)"},{k:"contact",label:"联系方式"},{k:"address",label:"住址"},
   {k:"status",label:"状态"},{k:"note",label:"备注"},{k:"id",label:"ID"}
 ];
-const ROSTER_DEFAULT = ["name","gen","char_gen","sex","alive","lineage","birth","death","occupation"];
+const ROSTER_DEFAULT = ["name","gen","char_gen","sex","alive","birth","death","occupation","company","lineage"];
 function rosterCols(){ try{ const s=JSON.parse(localStorage.getItem("roster_cols")||"null"); if(Array.isArray(s)&&s.length) return s; }catch(e){} return ROSTER_DEFAULT.slice(); }
 let _rosterSort={k:"gen",dir:1}, _colpickOpen=false;
 function cellVal(p,k){ return k==="rel_count"?(state.relCount[p.id]||0):(k==="gen"?(genOf(p.id)??""):(k==="lineage"?familiesOf(p.id).join(" / "):(p[k]==null?"":p[k]))); }
