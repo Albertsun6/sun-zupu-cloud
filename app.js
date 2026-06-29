@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.19.1";
+const APP_VERSION = "v0.20.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1190,6 +1190,120 @@ function renderRoster(){
   box.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{ const p=byId(tr.dataset.pid); if(p) openDetail(p); });   // 点行看详情(含关系列表),编辑走详情里「编辑」
 }
 
+/* ---------- 表格导入(CSV/Excel)+ reconcile:按 姓名+出生年 匹配,逐条 合并/覆盖/跳过/新建 ---------- */
+const IMPORT_FIELDS=[
+  {k:"name",label:"姓名"},{k:"sex",label:"性别"},{k:"birth",label:"出生日期"},{k:"death",label:"卒年"},
+  {k:"alive",label:"在世"},{k:"char_gen",label:"字辈"},{k:"alias",label:"字号"},{k:"birth_place",label:"出生地"},
+  {k:"occupation",label:"学历/职业"},{k:"company",label:"公司"},{k:"residence",label:"居地"},
+  {k:"contact",label:"联系方式"},{k:"address",label:"住址"},{k:"deeds",label:"事迹"},{k:"note",label:"备注"},{k:"source",label:"来源"}
+];
+const IMPORT_HMAP={"姓名":"name","名字":"name","name":"name","性别":"sex","sex":"sex","出生":"birth","生年":"birth","出生日期":"birth","出生年月":"birth","生日":"birth","birth":"birth","出生地":"birth_place","籍贯":"birth_place","卒":"death","卒年":"death","享年":"death","在世":"alive","字辈":"char_gen","派字":"char_gen","字号":"alias","别名":"alias","学历":"occupation","职业":"occupation","occupation":"occupation","公司":"company","单位":"company","company":"company","工作单位":"company","居地":"residence","居住地":"residence","住址":"address","地址":"address","现住址":"address","联系方式":"contact","电话":"contact","手机":"contact","备注":"note","note":"note","来源":"source","事迹":"deeds","简历":"deeds"};
+let _imp=null;
+function parseDelimited(text,delim){
+  const rows=[]; let row=[],cell="",inQ=false;
+  for(let i=0;i<text.length;i++){ const c=text[i];
+    if(inQ){ if(c==='"'){ if(text[i+1]==='"'){cell+='"';i++;} else inQ=false; } else cell+=c; }
+    else if(c==='"') inQ=true;
+    else if(c===delim){ row.push(cell); cell=""; }
+    else if(c==='\n'){ row.push(cell); rows.push(row); row=[]; cell=""; }
+    else if(c==='\r'){}
+    else cell+=c; }
+  if(cell.length||row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r=>r.some(x=>(x||"").trim()));
+}
+async function parseTable(file){
+  const name=(file.name||"").toLowerCase();
+  if(name.endsWith(".xlsx")||name.endsWith(".xls")){
+    const XLSX=await import("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm");
+    const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:"array"});
+    const sh=wb.Sheets[wb.SheetNames[0]]; const aoa=XLSX.utils.sheet_to_json(sh,{header:1,defval:""}).filter(r=>r.some(c=>String(c||"").trim()));
+    return { headers:(aoa[0]||[]).map(x=>String(x||"")), rows:aoa.slice(1) };
+  }
+  const text=await file.text(); const firstLine=text.split(/\r?\n/)[0]||"";
+  const delim=(firstLine.split("\t").length>firstLine.split(",").length)?"\t":",";
+  const all=parseDelimited(text,delim);
+  return { headers:(all[0]||[]).map(x=>String(x||"")), rows:all.slice(1) };
+}
+function openImporter(){ _imp={step:1,headers:[],rows:[],mapping:{},preview:[]}; let mask=$("#importMask"); if(!mask){ mask=el("div","mask"); mask.id="importMask"; document.body.appendChild(mask); } renderImporter(); mask.classList.add("open"); }
+function renderImporter(){
+  const mask=$("#importMask"); if(!mask) return;
+  if(_imp.step===1){
+    mask.innerHTML=`<div class="modal" style="width:min(560px,100%)"><h2>表格导入(CSV / Excel)</h2>
+      <p class="hint">上传 .csv / .tsv / .xlsx(第一行须为表头)。按 <b>姓名 + 出生年</b> 匹配现有人,逐条让你选 合并/覆盖/跳过/新建,确认后才写(可在操作历史撤销)。<b>只导入人物字段,不导关系</b>。</p>
+      <input type="file" id="impFile" accept=".csv,.tsv,.xlsx,.xls,text/csv,text/tab-separated-values">
+      <div class="err" id="impErr"></div>
+      <div class="modal-foot"><span class="spacer"></span><button class="btn" id="impCancel">取消</button></div></div>`;
+    $("#impCancel").onclick=()=>mask.classList.remove("open"); mask.onclick=e=>{ if(e.target===mask) mask.classList.remove("open"); };
+    $("#impFile").onchange=async e=>{ const f=e.target.files[0]; if(!f) return; $("#impErr").textContent="解析中…";
+      try{ const {headers,rows}=await parseTable(f); if(!headers.length||!rows.length){ $("#impErr").textContent="没读到数据(需表头+至少1行数据)"; return; }
+        _imp.headers=headers; _imp.rows=rows; _imp.mapping={};
+        headers.forEach((h,i)=>{ const key=(h||"").trim(); _imp.mapping[i]=IMPORT_HMAP[key]||IMPORT_HMAP[key.toLowerCase()]||""; });
+        _imp.step=2; renderImporter();
+      }catch(err){ $("#impErr").textContent="解析失败:"+err.message; } };
+  } else if(_imp.step===2){
+    const rowsHtml=_imp.headers.map((h,i)=>`<div class="mergerow"><b style="min-width:7em;display:inline-block">${esc(h||"(空列"+(i+1)+")")}</b> → <select class="impmap" data-i="${i}"><option value="">忽略</option>${IMPORT_FIELDS.map(f=>`<option value="${f.k}"${_imp.mapping[i]===f.k?" selected":""}>${esc(f.label)}</option>`).join("")}</select> <span class="hint">例:${esc(String((_imp.rows[0]&&_imp.rows[0][i])||"").slice(0,18))}</span></div>`).join("");
+    mask.innerHTML=`<div class="modal" style="width:min(640px,100%)"><h2>列映射(${_imp.rows.length} 行)</h2>
+      <p class="hint">把每列对到人物字段(已自动猜,核对)。<b>姓名必须映射</b>;选「忽略」的列不导入。</p>
+      <div style="max-height:52vh;overflow:auto">${rowsHtml}</div><div class="err" id="impErr"></div>
+      <div class="modal-foot"><button class="btn" id="impBack">上一步</button><span class="spacer"></span><button class="btn btn-primary" id="impNext">下一步:匹配预览</button></div></div>`;
+    mask.querySelectorAll(".impmap").forEach(s=>s.onchange=()=>{ _imp.mapping[+s.dataset.i]=s.value; });
+    $("#impBack").onclick=()=>{ _imp.step=1; renderImporter(); };
+    $("#impNext").onclick=()=>{ if(!Object.values(_imp.mapping).includes("name")){ $("#impErr").textContent="请把某列映射为「姓名」"; return; } buildImportPreview(); _imp.step=3; renderImporter(); };
+  } else { renderImportPreview(); }
+}
+function buildImportPreview(){
+  _imp.preview=_imp.rows.map(r=>{
+    const inc={}; Object.keys(_imp.mapping).forEach(i=>{ const k=_imp.mapping[i]; if(!k) return; let v=(r[i]==null?"":String(r[i])).trim();
+      if(k==="birth"&&v){ const nd=normalizeDate(v); if(nd.ok&&nd.value) v=nd.value; } inc[k]=v; });
+    const nm=(inc.name||"").trim();
+    const yr=(inc.birth||"").match(/\d{4}/), y=yr?yr[0]:null;
+    const same=state.persons.filter(p=>!p.deleted && (p.name||"").trim()===nm);
+    let cands=same, byYear=false;
+    if(y){ cands=same.filter(p=>{ const m=(p.birth||"").match(/\d{4}/); return m&&m[0]===y; }); byYear=true; }
+    return { inc, nm, y, byYear, options:same, target:(cands.length===1?cands[0].id:"__new__"), strategy:(cands.length===1?"merge":"new") };
+  }).filter(x=>x.nm);
+}
+function renderImportPreview(){
+  const mask=$("#importMask"); if(!mask) return; const P=_imp.preview;
+  const newCount=P.filter(x=>x.target==="__new__").length;
+  const rows=P.map((x,i)=>{
+    const sum=[x.inc.name,x.inc.sex,x.inc.birth,x.inc.company].filter(Boolean).join(" · ");
+    const opts=`<option value="__new__"${x.target==="__new__"?" selected":""}>➕ 新建</option>`+(x.options||[]).map(p=>`<option value="${esc(p.id)}"${x.target===p.id?" selected":""}>${esc(p.name)}·${esc(p.birth||"无生年")}·${esc(p.id)}</option>`).join("");
+    const strat = x.target==="__new__" ? `<span class="hint">新建</span>` : `<select class="imp-strat" data-i="${i}"><option value="merge"${x.strategy==="merge"?" selected":""}>合并·填空</option><option value="overwrite"${x.strategy==="overwrite"?" selected":""}>覆盖</option><option value="skip"${x.strategy==="skip"?" selected":""}>跳过</option></select>`;
+    const warn=(!x.byYear&&(x.options||[]).length)?' <span class="hint" style="color:#b45309">无生年·仅按姓名,请核对</span>':((x.options||[]).length>1?' <span class="hint" style="color:#b45309">多个同名</span>':'');
+    return `<tr><td>${esc(sum)}${warn}</td><td><select class="imp-match" data-i="${i}">${opts}</select></td><td>${strat}</td></tr>`;
+  }).join("");
+  mask.innerHTML=`<div class="modal" style="width:min(840px,100%)"><h2>匹配预览(${P.length} 行 · 新建 ${newCount})</h2>
+    <p class="hint">左=导入数据,中=匹配到谁(可改/选新建),右=命中现有时怎么处理。<b>合并·填空</b>只补空字段(不动已有);<b>覆盖</b>用导入值覆盖;<b>跳过</b>不动。</p>
+    <div style="margin:.3rem 0">命中现有的全部设为: <button class="btn btn-sm" data-all="merge">合并</button> <button class="btn btn-sm" data-all="overwrite">覆盖</button> <button class="btn btn-sm" data-all="skip">跳过</button></div>
+    <div style="max-height:50vh;overflow:auto"><table class="roster"><thead><tr><th>导入数据</th><th>匹配到</th><th>处理</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="err" id="impErr"></div>
+    <div class="modal-foot"><button class="btn" id="impBack">上一步</button><span class="spacer"></span><button class="btn btn-primary" id="impRun">确认导入</button></div></div>`;
+  mask.querySelectorAll(".imp-match").forEach(s=>s.onchange=()=>{ const i=+s.dataset.i; _imp.preview[i].target=s.value; _imp.preview[i].strategy=(s.value==="__new__")?"new":(_imp.preview[i].strategy==="new"?"merge":_imp.preview[i].strategy); renderImporter(); });
+  mask.querySelectorAll(".imp-strat").forEach(s=>s.onchange=()=>{ _imp.preview[+s.dataset.i].strategy=s.value; });
+  mask.querySelectorAll("[data-all]").forEach(b=>b.onclick=()=>{ _imp.preview.forEach(x=>{ if(x.target!=="__new__") x.strategy=b.dataset.all; }); renderImporter(); });
+  $("#impBack").onclick=()=>{ _imp.step=2; renderImporter(); };
+  $("#impRun").onclick=runImport;
+}
+async function runImport(){
+  const mask=$("#importMask"), P=_imp.preview, btn=$("#impRun"); btn.disabled=true; btn.textContent="导入中…";
+  let created=0,merged=0,over=0,skipped=0; const fails=[];
+  const clean=inc=>{ const o={}; Object.keys(inc).forEach(k=>{ const v=(inc[k]||"").trim(); if(v) o[k]=v; }); return o; };
+  for(const x of P){
+    try{
+      if(x.target==="__new__"){ if(!x.nm) continue; await api("POST","/api/persons",{ ...clean(x.inc), status:(x.inc.status||"待考") }); created++; }
+      else { const ex=byId(x.target); if(!ex){ fails.push(x.nm+":匹配对象不存在"); continue; }
+        if(x.strategy==="skip"){ skipped++; continue; }
+        const patch={}; Object.keys(x.inc).forEach(k=>{ const v=(x.inc[k]||"").trim(); if(!v) return;
+          if(x.strategy==="merge"){ if(!((ex[k]||"").trim())) patch[k]=v; } else patch[k]=v; });
+        if(Object.keys(patch).length){ await api("PUT","/api/persons/"+encodeURIComponent(x.target),patch); if(x.strategy==="merge")merged++; else over++; } else skipped++;
+      }
+    }catch(e){ fails.push((x.nm||"?")+":"+e.message); }
+  }
+  mask.classList.remove("open"); await reloadPersons(); await refreshRelCount(); renderHeader(); renderPeople(); renderHealth();
+  alert(`导入完成:新建 ${created} · 合并 ${merged} · 覆盖 ${over} · 跳过 ${skipped}`+(fails.length?`\n失败 ${fails.length}:\n`+fails.slice(0,12).join("\n"):"")+"\n(均可在操作历史撤销)");
+}
+
 /* ---------- AI 批量添加(粘贴文字 → DeepSeek 识别 → 草稿审核 → 创建)---------- */
 let _aiDrafts=[];
 // 世代(派生)/本族外部 已不在草稿;配偶/母/父(文字)暂留(写入退役列,供 v0.11 整理为关系)。
@@ -1437,6 +1551,7 @@ document.addEventListener("keydown", e=>{
   if($("#spkidMask")&&$("#spkidMask").classList.contains("open")){ const b=$("#spkCancel"); if(b)b.click(); return; }
   if($("#backfillMask")&&$("#backfillMask").classList.contains("open")){ const b=$("#bfCancel")||$("#bfClose"); if(b)b.click(); return; }
   if($("#dateNormMask")&&$("#dateNormMask").classList.contains("open")){ const b=$("#dnCancel"); if(b)b.click(); return; }
+  if($("#importMask")&&$("#importMask").classList.contains("open")){ $("#importMask").classList.remove("open"); return; }
   if($("#pwMask")&&$("#pwMask").classList.contains("open")) $("#pwMask").classList.remove("open");
   else if($("#mask").classList.contains("open")) closeModal();
   else if($("#detailMask").classList.contains("open")) closeDetail();
@@ -1474,6 +1589,7 @@ $("#exCsv")       && ($("#exCsv").onclick=()=>window.EXPORT.csv(state.share));
 $("#exGedcom")    && ($("#exGedcom").onclick=()=>window.EXPORT.gedcom());
 $("#exJson")      && ($("#exJson").onclick=()=>window.EXPORT.json(state.share));
 $("#aiBtn")       && ($("#aiBtn").onclick=openAI);
+$("#importBtn")   && ($("#importBtn").onclick=openImporter);
 $("#aiParse")     && ($("#aiParse").onclick=aiParse);
 $("#aiCreateAll") && ($("#aiCreateAll").onclick=aiCreateAll);
 $("#aiFileBtn")   && ($("#aiFileBtn").onclick=()=>$("#aiFile").click());
