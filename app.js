@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.17.0";
+const APP_VERSION = "v0.18.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -163,25 +163,25 @@ function renderFilters(){
   fb.appendChild(mk("全部字辈","charGen",cg));
   fb.appendChild(mk("全部状态","status",["确认","存疑","待考","待补"]));
   fb.appendChild(mk("在世/已故","alive",["是","否"]));
-  const lins=lineagesList();
-  if(lins.length>1){ const ls=el("select"); const o0=el("option",null,"全部族谱"); o0.value=""; ls.appendChild(o0);
-    lins.forEach(l=>{ const o=el("option",null,l.name+"("+l.count+")"); o.value=l.name; if(state.lineage===l.name)o.selected=true; ls.appendChild(o); });
-    ls.onchange=()=>{ state.lineage=ls.value; renderFilters(); renderPeople(); if(document.getElementById("view-tree").classList.contains("active"))renderTree(); }; fb.appendChild(ls); }
-  const fcEl=el("span","fcount"); fcEl.id="fcount"; fb.appendChild(fcEl);
-  if(state.q||anyFilter()||state.lineage){ const clr=el("button","btn btn-sm","清除"); clr.onclick=()=>{ state.q=""; $("#search").value=""; state.lineage=""; state.filters={charGen:"",status:"",alive:""}; renderFilters(); renderPeople(); }; fb.appendChild(clr); }
+  const fcEl=el("span","fcount"); fcEl.id="fcount"; fb.appendChild(fcEl);   // 族谱筛选已去除(非孙氏识别不准);孙氏改为独立分页
+  if(state.q||anyFilter()){ const clr=el("button","btn btn-sm","清除"); clr.onclick=()=>{ state.q=""; $("#search").value=""; state.filters={charGen:"",status:"",alive:""}; renderFilters(); renderPeople(); }; fb.appendChild(clr); }
 }
-// 名册(人物视图)= 列表/卡片(按世代)双模式调度器;模式记本地。世系总览已并入此处。
+// 名册 = 列表 / 卡片 / 孙氏 三页。列表&卡片=全部人;孙氏=只显孙氏(卡片按世代)。计数显示在按钮上。
 function renderPeople(){
-  const mode = state.peopleMode || (state.peopleMode = (localStorage.getItem("people_view")||"list"));   // 默认列表,再卡片
+  const mode = state.peopleMode || (state.peopleMode = (localStorage.getItem("people_view")||"list"));   // 默认列表
+  const live = state.persons.filter(p=>!p.deleted);
+  const total = live.length, sunCount = live.filter(p=>familiesOf(p.id).includes("孙氏")).length;   // 与孙氏页 renderCards 的过滤口径一致
   const sw=$("#peopleMode");
-  if(sw){ sw.innerHTML=[["list","☰ 列表"],["cards","🃏 卡片(按世代)"]].map(([m,l])=>`<button class="btn btn-sm${mode===m?" btn-primary":""}" data-mode="${m}">${l}</button>`).join("");
+  if(sw){ sw.innerHTML=[["list","☰ 列表 "+total],["cards","🃏 卡片 "+total],["sun","孙氏 "+sunCount]].map(([m,l])=>`<button class="btn btn-sm${mode===m?" btn-primary":""}" data-mode="${m}">${l}</button>`).join("");
     sw.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{ state.peopleMode=b.dataset.mode; try{localStorage.setItem("people_view",b.dataset.mode);}catch(e){} renderPeople(); }); }
-  const cards = mode==="cards";
+  const isList = mode==="list";
+  state.lineage = mode==="sun" ? "孙氏" : "";       // 孙氏页只显孙氏;列表/卡片显全部
+  const showCards = !isList;
   const fb=$("#filterBar"), ov=$("#overview"), rb=$("#rosterBox"), sn=$("#shareNote");
-  if(fb) fb.style.display=cards?"":"none";
-  if(ov) ov.style.display=cards?"":"none";
-  if(rb) rb.style.display=cards?"none":"";
-  if(cards){ renderFilters(); renderCards(); } else { if(sn) sn.style.display="none"; renderRoster(); }
+  if(fb) fb.style.display=showCards?"":"none";
+  if(ov) ov.style.display=showCards?"":"none";
+  if(rb) rb.style.display=showCards?"none":"";
+  if(showCards){ renderFilters(); renderCards(); } else { if(sn) sn.style.display="none"; renderRoster(); }
 }
 function renderCards(){
   const box=$("#overview"); box.innerHTML="";
@@ -502,6 +502,9 @@ function renderHealth(){
       await reloadPersons(); await refreshRelCount(); renderHeader(); renderPeople(); renderHealth();
       if(fails.length) alert(`已改 ${ok} 条,失败 ${fails.length}:\n`+fails.join("\n")); };
     if(box.lastChild) box.lastChild.appendChild(b); }
+  // 出生日期规范化工具(规则+AI)
+  if(state.canEdit){ const pn=el("div","panel"); pn.innerHTML=`<h3>🤖 出生日期规范化</h3><div class="hint">把「出生日期」统一成 年 / 年-月 / 年-月-日(规则优先,农历/年号等用 AI 兜底),不识别的会标出供手动处理。</div>`;
+    const b=el("button","btn btn-sm btn-primary","规范出生日期…"); b.style.marginTop=".4rem"; b.onclick=openDateNormalizer; pn.appendChild(b); box.appendChild(pn); }
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });   // 先看详情(含关系列表),编辑走详情里「编辑」
   box.querySelectorAll(".spConvBtn").forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openSpouseConverter(b.dataset.pid); });
   box.querySelectorAll(".mergebtn").forEach(b=>b.onclick=()=>{ const g=h.dupName.find(x=>x.name===b.dataset.name); if(g) openMergeDialog(g.list); });
@@ -900,13 +903,76 @@ function openEdit(p, prefill){
     $("#initRelObj").textContent="此人";
     $("#initRelWrap").style.display="";
   }
-  $("#charGenHint").textContent=""; charGenAuto(); initRelAuto(); toggleDeathFields();
+  $("#charGenHint").textContent=""; const _bh=$("#birthHint"); if(_bh)_bh.textContent=""; charGenAuto(); initRelAuto(); toggleDeathFields();
   $("#mask").classList.add("open");
   if(!p) setTimeout(()=>{ const n=$("#f_name"); if(n) n.focus(); }, 60);
 }
 function closeModal(){ $("#mask").classList.remove("open"); state.editing=null; }
 // 卒/葬字段仅在「在世=否」时显示(是/空=隐藏);随 f_alive 切换
 function toggleDeathFields(){ const dead=$("#f_alive")&&$("#f_alive").value==="否"; document.querySelectorAll(".death-field").forEach(e=>{ e.style.display=dead?"":"none"; }); }
+
+/* ---------- 出生日期规范化(规则优先 + AI 兜底)---------- */
+// 规则解析:→ {ok:true,value:"YYYY"|"YYYY-MM"|"YYYY-MM-DD"|""}  或 {ok:false,needAI:true}(交 AI)
+function normalizeDate(raw){
+  const s=(raw||"").trim(); if(!s) return {ok:true,value:""};
+  const p2=n=>String(n).padStart(2,"0"); let m;
+  if((m=s.match(/^(\d{3,4})\s*[\-\/.年]\s*(\d{1,2})\s*[\-\/.月]\s*(\d{1,2})\s*日?$/))){ const y=+m[1],mo=+m[2],d=+m[3]; if(mo>=1&&mo<=12&&d>=1&&d<=31) return {ok:true,value:y+"-"+p2(mo)+"-"+p2(d)}; return {ok:false,needAI:true}; }
+  if((m=s.match(/^(\d{3,4})\s*[\-\/.年]\s*(\d{1,2})\s*月?$/))){ const y=+m[1],mo=+m[2]; if(mo>=1&&mo<=12) return {ok:true,value:y+"-"+p2(mo)}; return {ok:false,needAI:true}; }
+  if((m=s.match(/^(\d{3,4})\s*年?$/))){ const y=+m[1]; if(y>=1000&&y<=2200) return {ok:true,value:String(y)}; return {ok:false,needAI:true}; }
+  return {ok:false,needAI:true};
+}
+async function aiNormalizeDates(list){
+  if(!list.length) return [];
+  const session=await window.SBAUTH.getSession(); const token=session&&session.access_token;
+  const r=await fetch("/api/normalize-dates",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({dates:list}) });
+  const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j.results||[];
+}
+// 表单失焦即时规范:规则能认就直接规范;认不出调 AI;再认不出黄字提示
+async function onBirthBlur(){
+  const inp=$("#f_birth"), hint=$("#birthHint"); if(!inp) return; const raw=inp.value.trim();
+  if(!raw){ if(hint) hint.textContent=""; return; }
+  const r=normalizeDate(raw);
+  if(r.ok){ if(r.value&&r.value!==raw){ inp.value=r.value; if(hint){ hint.textContent="已规范"; hint.style.color="#047857"; } } else if(hint){ hint.textContent=""; } return; }
+  if(hint){ hint.textContent="识别中…"; hint.style.color="#64748b"; }
+  try{ const g=(await aiNormalizeDates([raw]))[0];
+    if(g&&g.ok&&g.value){ inp.value=g.value; if(hint){ hint.textContent="AI识别"+(g.note?"("+g.note+")":""); hint.style.color="#047857"; } }
+    else if(hint){ hint.textContent="⚠无法识别,请填 年/年-月/年-月-日"; hint.style.color="#b45309"; }
+  }catch(e){ if(hint){ hint.textContent="识别失败:"+e.message; hint.style.color="#b45309"; } }
+}
+// 批量规范:扫全部 birth → 规则 + AI兜底 → 预览(原→新,不识别标红)→ 勾选确认才改(可撤销)
+async function openDateNormalizer(){
+  let mask=$("#dateNormMask"); if(!mask){ mask=el("div","mask"); mask.id="dateNormMask"; document.body.appendChild(mask); }
+  const people=state.persons.filter(p=>!p.deleted && (p.birth||"").trim());
+  const rows=[], needAI=[];
+  people.forEach(p=>{ const raw=(p.birth||"").trim(); const r=normalizeDate(raw);
+    if(r.ok){ if(r.value!==raw) rows.push({p,raw,value:r.value,src:"规则",ok:true}); }   // 相同=已规范,跳过
+    else needAI.push({p,raw}); });
+  mask.innerHTML=`<div class="modal" style="width:min(680px,100%)"><h2>规范出生日期</h2><p class="hint">规则已处理 ${rows.length} 条${needAI.length?(",正用 AI 识别 "+needAI.length+" 条难解析项…"):"。"}</p></div>`;
+  mask.classList.add("open");
+  if(needAI.length){
+    try{ const res=await aiNormalizeDates(needAI.map(x=>x.raw)); const mp={}; res.forEach(r=>{ mp[r.input]=r; });
+      needAI.forEach(x=>{ const g=mp[x.raw]||{}; if(g.ok&&g.value&&g.value!==x.raw) rows.push({p:x.p,raw:x.raw,value:g.value,src:"AI"+(g.note?"·"+g.note:""),ok:true}); else rows.push({p:x.p,raw:x.raw,value:"",src:"AI",ok:false}); });
+    }catch(e){ needAI.forEach(x=>rows.push({p:x.p,raw:x.raw,value:"",src:"AI失败",ok:false})); }
+  }
+  const good=rows.filter(r=>r.ok), bad=rows.filter(r=>!r.ok);
+  const list=good.map((r,i)=>`<label class="mergerow"><input type="checkbox" class="dn" data-i="${i}" checked> <b>${esc(r.p.name||r.p.id)}</b> <span class="hint">「${esc(r.raw)}」→</span> <b style="color:#047857">${esc(r.value)}</b> <span class="hint">(${esc(r.src)})</span></label>`).join("");
+  const badList=bad.map(r=>`<div class="hint" style="color:#b45309;padding:.2rem 0">⚠ <b>${esc(r.p.name||r.p.id)}</b>:「${esc(r.raw)}」无法识别,请手动到该人物编辑</div>`).join("");
+  mask.innerHTML=`<div class="modal" style="width:min(680px,100%)">
+    <h2>规范出生日期 <span class="pill pill-info">${good.length}</span></h2>
+    <p class="hint">统一成 年 / 年-月 / 年-月-日(可缺)。逐条核对,取消勾选不对的,确认后改(可在操作历史撤销)。${bad.length?(" 有 "+bad.length+" 条无法识别,已标红、需手动。"):""}</p>
+    <div style="max-height:52vh;overflow:auto">${list||'<div class="hint">没有需要规范的(都已是标准格式)。</div>'}${badList}</div>
+    <div class="modal-foot">${good.length?`<label class="hint"><input type="checkbox" id="dnAll" checked> 全选</label>`:""}<span class="spacer"></span><button class="btn" id="dnCancel">关闭</button>${good.length?`<button class="btn btn-primary" id="dnOk">应用所选</button>`:""}</div>
+  </div>`;
+  $("#dnCancel").onclick=()=>mask.classList.remove("open"); mask.onclick=e=>{ if(e.target===mask) mask.classList.remove("open"); };
+  const dnAll=$("#dnAll"); if(dnAll) dnAll.onclick=e=>mask.querySelectorAll(".dn").forEach(c=>c.checked=e.target.checked);
+  const dnOk=$("#dnOk"); if(dnOk) dnOk.onclick=async()=>{
+    const picks=[...mask.querySelectorAll(".dn:checked")].map(c=>good[+c.dataset.i]); if(!picks.length){ mask.classList.remove("open"); return; }
+    dnOk.disabled=true; dnOk.textContent="应用中…"; let ok=0; const fails=[];
+    for(const r of picks){ try{ await api("PUT","/api/persons/"+encodeURIComponent(r.p.id),{birth:r.value}); ok++; }catch(e){ fails.push((r.p.name||r.p.id)+":"+e.message); } }
+    mask.classList.remove("open"); await reloadPersons(); await refreshRelCount(); renderHeader(); renderPeople(); renderHealth();
+    if(fails.length) alert("已规范 "+ok+" 条,失败 "+fails.length+":\n"+fails.join("\n"));
+  };
+}
 function collectForm(){ const d={}; FORM_KEYS.forEach(k=>{ const f=$("#f_"+k); if(f) d[k]=f.value.trim(); }); return d; }  // 父亲改走关系边,不再写 father_id 列
 // 对账父亲:表单选的父 与 当前 father 边 不同则 删旧边+建新边(单一真源=关系图)
 async function reconcileFatherEdge(childId, newFatherId){
@@ -1089,16 +1155,12 @@ function renderRoster(){
   const colset=new Set(rosterCols());
   const orderedCols=ROSTER_COLS.filter(c=>colset.has(c.k));
   let list=state.persons.filter(p=>!p.deleted && matchQ(p));
-  const lin=$("#rosterLineage") ? $("#rosterLineage").value : "";
-  if(lin) list=list.filter(p=>familiesOf(p.id).includes(lin));
   const sk=_rosterSort.k, dir=_rosterSort.dir;
   list=list.slice().sort((a,b)=>{ let va,vb; if(sk==="gen"){va=gk(genOf(a.id));vb=gk(genOf(b.id));} else if(sk==="rel_count"){va=state.relCount[a.id]||0;vb=state.relCount[b.id]||0;} else if(sk==="lineage"){va=familiesOf(a.id).join("/");vb=familiesOf(b.id).join("/");} else {va=(a[sk]??"")+"";vb=(b[sk]??"")+"";}
     return va<vb?-dir:va>vb?dir:0; });
   const picker=`<details class="colpick"${_colpickOpen?" open":""}><summary>列设置(${colset.size} 列)</summary><div class="colgrid">`
     + ROSTER_COLS.map(c=>`<label><input type="checkbox" data-col="${c.k}"${colset.has(c.k)?" checked":""}> ${esc(c.label)}</label>`).join("") + `</div></details>`;
-  const bar=`<div class="rosterbar">${picker}`
-    + `<select id="rosterLineage"><option value="">全部族谱</option>`+lineagesList().map(l=>`<option value="${esc(l.name)}"${lin===l.name?" selected":""}>${esc(l.name)}(${l.count})</option>`).join("")+`</select>`
-    + `<span class="hint">${list.length} 人 · 点一行${state.canEdit?"编辑":"看详情"}</span></div>`;
+  const bar=`<div class="rosterbar">${picker}<span class="hint">点表头排序 · 点一行${state.canEdit?"看详情/编辑":"看详情"}</span></div>`;   // 族谱筛选与计数已移除(计数在上方按钮)
   const thead="<tr>"+orderedCols.map(c=>`<th data-sk="${c.k}">${esc(c.label)}${sk===c.k?(dir>0?" ▲":" ▼"):""}</th>`).join("")+"</tr>";
   const fmt=(p,k)=> k==="rel_count"?(state.relCount[p.id]||0):(k==="gen"?(genOf(p.id)??""):(k==="lineage"?familiesOf(p.id).join(" / "):(p[k]==null?"":p[k])));
   const rows=list.map(p=>`<tr data-pid="${esc(p.id)}">`+orderedCols.map(c=>`<td>${esc(String(fmt(p,c.k)))}</td>`).join("")+`</tr>`).join("");
@@ -1107,7 +1169,6 @@ function renderRoster(){
   box.querySelectorAll(".colpick input[type=checkbox]").forEach(cb=>cb.onchange=()=>{
     const cur=new Set(rosterCols()); cb.checked?cur.add(cb.dataset.col):cur.delete(cb.dataset.col);
     localStorage.setItem("roster_cols", JSON.stringify(ROSTER_COLS.filter(c=>cur.has(c.k)).map(c=>c.k))); renderRoster(); });
-  const rk=$("#rosterLineage"); if(rk) rk.onchange=renderRoster;
   box.querySelectorAll("th[data-sk]").forEach(th=>th.onclick=()=>{ const k=th.dataset.sk; _rosterSort=(sk===k)?{k,dir:-dir}:{k,dir:1}; renderRoster(); });
   box.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{ const p=byId(tr.dataset.pid); if(p) openDetail(p); });   // 点行看详情(含关系列表),编辑走详情里「编辑」
 }
@@ -1342,6 +1403,7 @@ $("#f_father_id").onchange=charGenAuto;
 $("#f_rel_person").onchange=initRelAuto;
 $("#f_rel_type").onchange=initRelAuto;
 $("#f_alive")&&($("#f_alive").onchange=toggleDeathFields);
+$("#f_birth")&&($("#f_birth").onblur=onBirthBlur);   // 出生日期失焦即时规范(规则+AI)
 $("#f_name").oninput=()=>{ const o=$("#initRelObj"); if(o) o.textContent=($("#f_name").value.trim())||"此人"; };
 // Esc 关闭最上层弹窗(此前无键盘退出)
 document.addEventListener("keydown", e=>{
@@ -1357,6 +1419,7 @@ document.addEventListener("keydown", e=>{
   if($("#coparentMask")&&$("#coparentMask").classList.contains("open")){ const b=$("#cpCancel"); if(b)b.click(); return; }
   if($("#spkidMask")&&$("#spkidMask").classList.contains("open")){ const b=$("#spkCancel"); if(b)b.click(); return; }
   if($("#backfillMask")&&$("#backfillMask").classList.contains("open")){ const b=$("#bfCancel")||$("#bfClose"); if(b)b.click(); return; }
+  if($("#dateNormMask")&&$("#dateNormMask").classList.contains("open")){ const b=$("#dnCancel"); if(b)b.click(); return; }
   if($("#pwMask")&&$("#pwMask").classList.contains("open")) $("#pwMask").classList.remove("open");
   else if($("#mask").classList.contains("open")) closeModal();
   else if($("#detailMask").classList.contains("open")) closeDetail();
