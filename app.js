@@ -13,13 +13,29 @@ async function getMermaid(){
 const $ = s => document.querySelector(s);
 const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
-// 照片点击放大预览(懒建覆盖层,点任意处或 Esc 关闭)
-function openLightbox(src){ if(!src) return; let m=document.getElementById("lightbox");
-  if(!m){ m=el("div","lightbox"); m.id="lightbox"; m.onclick=()=>m.classList.remove("open"); document.body.appendChild(m); }
-  m.innerHTML=`<img src="${esc(src)}" alt="">`; m.classList.add("open"); }
+// 照片放大预览(画廊):传图片数组+起始下标,可◀▶/方向键/滑动切换;点黑底或 Esc 关闭
+let _lbImgs=[], _lbIdx=0, _lbX=0;
+function openLightbox(imgs, idx){
+  _lbImgs = Array.isArray(imgs) ? imgs.filter(Boolean) : (imgs?[imgs]:[]);
+  if(!_lbImgs.length) return;
+  _lbIdx = Math.max(0, Math.min(idx||0, _lbImgs.length-1));
+  let m=document.getElementById("lightbox");
+  if(!m){ m=el("div","lightbox"); m.id="lightbox"; document.body.appendChild(m);
+    m.onclick=e=>{ if(e.target===m) m.classList.remove("open"); };           // 点黑底关;点图/按钮不关
+    m.addEventListener("touchstart",e=>{ _lbX=e.touches[0].clientX; },{passive:true});
+    m.addEventListener("touchend",e=>{ const dx=e.changedTouches[0].clientX-_lbX; if(Math.abs(dx)>40) _lbStep(dx<0?1:-1); },{passive:true});
+  }
+  _renderLightbox(); m.classList.add("open");
+}
+function _lbStep(d){ if(_lbImgs.length<2) return; _lbIdx=(_lbIdx+d+_lbImgs.length)%_lbImgs.length; _renderLightbox(); }
+function _renderLightbox(){
+  const m=document.getElementById("lightbox"); if(!m) return; const multi=_lbImgs.length>1;
+  m.innerHTML=`${multi?'<button class="lb-nav lb-prev" title="上一张(←)">‹</button>':""}<img src="${esc(_lbImgs[_lbIdx])}" alt="">${multi?`<button class="lb-nav lb-next" title="下一张(→)">›</button><div class="lb-count">${_lbIdx+1} / ${_lbImgs.length}</div>`:""}`;
+  if(multi){ m.querySelector(".lb-prev").onclick=e=>{e.stopPropagation();_lbStep(-1);}; m.querySelector(".lb-next").onclick=e=>{e.stopPropagation();_lbStep(1);}; }
+}
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.12.3";
+const APP_VERSION = "v0.12.4";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -501,7 +517,13 @@ async function openDetail(p){
   state.detailing=p.id;
   const box=$("#detailBody");
   const living=p.alive==="是", share=state.share&&living;
-  const photo=(p.photo&&!share)?`<img class="dphoto" loading="lazy" src="${esc(window.photoUrl(p.photo))}">`:`<div class="dphoto noimg">${esc((p.name||"?").slice(-1))}</div>`;
+  // 照片:头像即主图;点头像打开画廊(全部照片,左右翻)。相册区不再单独显示。
+  const media = share ? [] : (await api("GET","/api/persons/"+encodeURIComponent(p.id)+"/media").catch(()=>[]));
+  const gallery = media.map(md=>window.photoUrl(md.path));
+  const mainIdx = Math.max(0, media.findIndex(md=>md.path===p.photo));
+  const photo=(p.photo&&!share)
+    ? `<div class="dphoto-wrap"><img class="dphoto" loading="lazy" src="${esc(window.photoUrl(p.photo))}">${media.length>1?`<span class="dphoto-count">📷 ${media.length}</span>`:""}</div>`
+    : `<div class="dphoto noimg">${esc((p.name||"?").slice(-1))}</div>`;
   let html=`<div class="dhead">${photo}<div class="dhead-main"><div class="dname">${esc(p.name||"(无名)")}</div>`
     +`<div class="dpills">${(p.char_gen&&p.char_gen!=="—")?`<span class="tag">${esc(p.char_gen)}字辈</span>`:""}<span class="tag">第${genStr(p.id)}代</span>${living?'<span class="tag">在世</span>':""} ${statusPill(p.status)}</div></div></div>`;
   if(share){ box.innerHTML=html+`<p class="note">分享模式:在世亲属仅显示姓名/字辈/世代,其余隐藏。</p>`; $("#detailMask").classList.add("open"); return; }
@@ -528,11 +550,7 @@ async function openDetail(p){
   if(p.deeds) html+=`<div class="dsec"><div class="dsec-h">事迹</div><div class="ditem">${esc(p.deeds)}</div></div>`;
   const m3=[p.source&&("来源:"+p.source), p.note&&("备注:"+p.note)].filter(Boolean);
   if(m3.length) html+=`<div class="dsec hint" style="margin-top:.6rem">${m3.map(esc).join("<br>")}</div>`;
-  const media=(await api("GET","/api/persons/"+encodeURIComponent(p.id)+"/media").catch(()=>[])).filter(md=>md.path!==p.photo);  // 主图已作头像,相册不再重复显示
-  if(media.length){
-    html+=`<div class="dsec"><div class="dsec-h">相册(其他照片)</div><div class="dalbum">`
-      +media.map(md=>`<figure><img loading="lazy" src="${esc(window.photoUrl(md.path))}"><figcaption>${esc(md.caption||"")}</figcaption></figure>`).join("")+`</div></div>`;
-  }
+  // 照片不在详情页单列相册——全部照片点头像进画廊查看(上传/管理在「编辑」弹窗)
   // 关系网(详情页下方 = 关系管理中心:父/母/配偶/子女/社交 全在此整齐列表里增删改)
   const rtMap={}; (state.relTypes&&state.relTypes.length?state.relTypes:(await window.REL.types().catch(()=>[]))).forEach(t=>rtMap[t.type]=t);
   const rels=await window.REL.of(p.id).catch(()=>[]);
@@ -562,7 +580,9 @@ async function openDetail(p){
   html+=`<div class="dsec"><div class="dsec-h">关系网(${rels.length}) <button class="btn btn-sm" id="relEgoBtn">🎯 关系圈</button>${state.canEdit?` <button class="btn btn-sm" id="relAddToggle">+ 加关系</button>`:""}</div>${pending}${addForm}<div class="rel-list">${rh}</div></div>`;
   box.innerHTML=html;
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });
-  box.querySelectorAll(".dalbum img, img.dphoto").forEach(im=>{ im.style.cursor="zoom-in"; im.onclick=e=>{ e.stopPropagation(); openLightbox(im.src); }; });
+  { const open=()=>openLightbox(gallery, mainIdx);
+    const av=box.querySelector("img.dphoto"); if(av && gallery.length){ av.style.cursor="zoom-in"; av.onclick=open; }
+    const cc=box.querySelector(".dphoto-count"); if(cc) cc.onclick=open; }
   { const eb=$("#relEgoBtn"); if(eb) eb.onclick=()=>{ state.graphCenter=p.id; state.pathA=""; state.pathB=""; closeDetail(); switchView("graph"); }; }
   { const sb=$("#spConvDetail"); if(sb) sb.onclick=()=>{ closeDetail(); openSpouseConverter(p.id); }; }
   box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?(直接删除,不可恢复;人物本身不受影响)"))return; try{ await window.REL.del(+b.dataset.rid); await reloadPersons(); await refreshRelCount(); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
@@ -1106,8 +1126,15 @@ $("#f_rel_person").onchange=initRelAuto;
 $("#f_rel_type").onchange=initRelAuto;
 $("#f_name").oninput=()=>{ const o=$("#initRelObj"); if(o) o.textContent=($("#f_name").value.trim())||"此人"; };
 // Esc 关闭最上层弹窗(此前无键盘退出)
-document.addEventListener("keydown", e=>{ if(e.key!=="Escape") return;
-  const lb=$("#lightbox"); if(lb&&lb.classList.contains("open")){ lb.classList.remove("open"); return; }   // 先关图片预览
+document.addEventListener("keydown", e=>{
+  const lb=$("#lightbox");
+  if(lb&&lb.classList.contains("open")){                                   // 预览中:方向键翻图,Esc 关
+    if(e.key==="ArrowLeft"){ _lbStep(-1); return; }
+    if(e.key==="ArrowRight"){ _lbStep(1); return; }
+    if(e.key==="Escape"){ lb.classList.remove("open"); return; }
+    return;
+  }
+  if(e.key!=="Escape") return;
   if($("#mask").classList.contains("open")) closeModal();
   else if($("#detailMask").classList.contains("open")) closeDetail();
   else if($("#aiMask")&&$("#aiMask").classList.contains("open")) $("#aiMask").classList.remove("open");
