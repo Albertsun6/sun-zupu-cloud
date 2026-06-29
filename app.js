@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.13.0";
+const APP_VERSION = "v0.13.1";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -422,7 +422,7 @@ function mediaItem(md){
 function runHealth(){
   const ps=state.persons, ids=new Set(ps.map(p=>p.id));
   const F=state.fatherOf;
-  const out={cycle:[],dangling:[],charBreak:[],yearConflict:[],genMismatch:[],noFather:[],dupName:[]};
+  const out={cycle:[],dangling:[],charBreak:[],yearConflict:[],genMismatch:[],noFather:[],marriedIn:[],dupName:[]};
   ps.forEach(p=>{ const f=F[p.id]; if(f && !ids.has(f)) out.dangling.push(p); });   // 悬空父(FK通常已挡)
   const inCycle=new Set();
   ps.forEach(p=>{ const seen=new Set(); let cur=p.id;
@@ -437,8 +437,13 @@ function runHealth(){
     const f=F[p.id]&&byId(F[p.id]); if(f){ const fb=yr(f.birth); if(b&&fb&&b<=fb) out.yearConflict.push({p,why:`生(${b}) ≤ 父${f.name}生(${fb})`}); } });
   // 手填世代 ≠ 父+1(有父边且父能定位)
   ps.forEach(p=>{ const m=parseInt(p.gen,10), f=F[p.id]; if(!isNaN(m)&&f){ const fg=genOf(f); if(fg!=null&&m!==fg+1) out.genMismatch.push({p,why:`手填第${m}代,但父${(byId(f)||{}).name||f}第${fg}代(应第${fg+1}代)`}); } });
-  // 无父边但推算第>1代(疑缺父系连接,应补父亲让世代连续;父系待考线索见 father_note)
-  ps.forEach(p=>{ if(!F[p.id]){ const g=genOf(p.id); if(g!=null&&g>1) out.noFather.push({p,why:`第${g}代但未连父亲`+(p.father_note?`(线索:${p.father_note})`:"")}); } });
+  // 无父边但推算第>1代:区分「嫁入配偶」(本姓≠所嫁家族且配偶在本族有锚→无父正常)与「真缺父系」(应补父让世代连续)
+  const marriedIn=p=>{ const mine=surnameOfSelf(p.id); if(!mine) return false;
+    return (state.spouseOf[p.id]||[]).some(spId=>{ const s=surnameOfSelf(spId); if(!s||s===mine) return false;   // 同姓不算嫁入
+      return state.fatherOf[spId]||!isNaN(parseInt((byId(spId)||{}).gen,10)); }); };                              // 配偶有父边或手填世代=在本族有锚,p 系嫁入
+  ps.forEach(p=>{ if(!F[p.id]){ const g=genOf(p.id); if(g!=null&&g>1){
+    if(marriedIn(p)) out.marriedIn.push({p,why:`随配偶第${g}代 · 嫁入(本姓${surnameOfSelf(p.id)||"?"},无父属正常)`});
+    else out.noFather.push({p,why:`第${g}代但未连父亲`+(p.father_note?`(线索:${p.father_note})`:"")}); } } });
   const bn={}; ps.forEach(p=>{ if(p.name)(bn[p.name]=bn[p.name]||[]).push(p); });
   Object.keys(bn).forEach(n=>{ if(bn[n].length>1) out.dupName.push({name:n,list:bn[n]}); });
   return out;
@@ -446,7 +451,8 @@ function runHealth(){
 function renderHealth(){
   const box=$("#health"); box.innerHTML=""; const h=runHealth();
   const total=h.cycle.length+h.dangling.length+h.charBreak.length+h.yearConflict.length+h.genMismatch.length+h.noFather.length;
-  box.appendChild(el("p","note", total? `共发现 ${total} 处需注意(重名 ${h.dupName.length} 组另列,多为已知待核实的同名)。点条目可直接打开修正。` : "✅ 未发现父子/世代/年代/字辈类问题。"));
+  const miNote=h.marriedIn.length?` 另有 ${h.marriedIn.length} 位嫁入配偶(无父属正常)已单列、不计入。`:"";
+  box.appendChild(el("p","note", (total? `共发现 ${total} 处需注意(重名 ${h.dupName.length} 组另列,多为已知待核实的同名)。点条目可直接打开修正。` : "✅ 未发现父子/世代/年代/字辈类问题。")+miNote));
   const plink=(p,extra)=>{ const d=el("div","hitem"); d.innerHTML=`<a class="plink" data-pid="${esc(p.id)}">${esc(p.name||p.id)}</a> <span class="hint">${esc(extra||"")}</span>`; return d; };
   const sec=(title,arr,render,pill)=>{ const pn=el("div","panel");
     pn.innerHTML=`<h3>${title} <span class="pill ${arr.length?(pill||'pill-warn'):'pill-ok'}">${arr.length}</span></h3>`;
@@ -460,6 +466,7 @@ function renderHealth(){
     d.innerHTML=`<a class="plink" data-pid="${esc(x.p.id)}">${esc(x.p.name||x.p.id)}</a> <span class="hint">${esc(x.why)}</span>`
       +(state.canEdit?` <button class="btn btn-sm useGenBtn" data-pid="${esc(x.p.id)}">采用推算(清手填)</button>`:""); return d; }, "pill-info");
   sec("⑥ 疑缺父系连接(世代断点)", h.noFather, x=>plink(x.p,x.why), "pill-info");
+  if(h.marriedIn.length) sec("· 嫁入配偶(无父属正常,不计为问题)", h.marriedIn, x=>plink(x.p,x.why), "pill-ok");
   sec("⑦ 重名(同名异人?需核实)", h.dupName, x=>{ const d=el("div","hitem"); d.innerHTML=`<b>${esc(x.name)}</b>: `+x.list.map(p=>`<a class="plink chip" data-pid="${esc(p.id)}">${esc(p.id)}·第${genStr(p.id)}代</a>`).join("")+(state.canEdit?` <button class="btn btn-sm mergebtn" data-name="${esc(x.name)}">合并…</button>`:""); return d; }, "pill-info");
   // ⑧ 配偶待整理(迁移任务,非错误):旧 spouse 自由文本 → 真实配偶人物 + 夫妻边
   const pend=state.persons.filter(p=>!p.deleted && (p.spouse||"").trim());
