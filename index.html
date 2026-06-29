@@ -176,14 +176,14 @@
     <div class="formsec">
       <div class="formsec-h">③ 生卒 · 籍葬</div>
       <div class="grid2">
-        <div class="field"><label for="f_birth">生年(公历)</label><div class="inwrap"><input type="text" id="f_birth"/><button type="button" class="btn btn-sm cal-btn edit-only" data-ev="birth" title="用万年历选日期,自动填好公历+农历">📅 万年历</button></div></div>
+        <div class="field"><label for="f_birth">出生日期(公历)</label><div class="inwrap"><input type="text" id="f_birth" placeholder="如 1976-09-04 / 1976 / 1976-09"/><button type="button" class="btn btn-sm cal-btn edit-only" data-ev="birth" title="用万年历选日期,自动填好公历+农历">📅 万年历</button></div></div>
         <div class="field"><label for="f_birth_lunar">生辰(农历)</label><input type="text" id="f_birth_lunar" placeholder="如 农历六月十六"/></div>
         <div class="field"><label for="f_birth_time">出生时间(自动推时辰) <span class="hint" id="f_birth_time_sc"></span></label><div class="inwrap"><input type="text" id="f_birth_time" placeholder="如 14:30 → 未时"/><button type="button" class="btn btn-sm time-btn edit-only" data-time="birth" title="点选时辰/钟点,自动算时辰">🕐 选时间</button></div></div>
-        <div class="field"><label for="f_death">卒年/享年(公历)</label><div class="inwrap"><input type="text" id="f_death"/><button type="button" class="btn btn-sm cal-btn edit-only" data-ev="death" title="用万年历选日期,自动填好公历+农历">📅 万年历</button></div></div>
-        <div class="field"><label for="f_death_lunar">卒日(农历)</label><input type="text" id="f_death_lunar" placeholder="如 腊月初九"/></div>
-        <div class="field"><label for="f_alive">在世</label><select id="f_alive"><option value=""></option><option>是</option><option>否</option></select></div>
+        <div class="field"><label for="f_alive">在世</label><select id="f_alive"><option value="">未知</option><option>是</option><option>否</option></select></div>
         <div class="field"><label for="f_birth_place">出生地</label><input type="text" id="f_birth_place"/></div>
-        <div class="field"><label for="f_burial">葬地/茔地</label><input type="text" id="f_burial"/></div>
+        <div class="field death-field"><label for="f_death">卒年/享年(公历)</label><div class="inwrap"><input type="text" id="f_death"/><button type="button" class="btn btn-sm cal-btn edit-only" data-ev="death" title="用万年历选日期,自动填好公历+农历">📅 万年历</button></div></div>
+        <div class="field death-field"><label for="f_death_lunar">卒日(农历)</label><input type="text" id="f_death_lunar" placeholder="如 腊月初九"/></div>
+        <div class="field death-field"><label for="f_burial">葬地/茔地</label><input type="text" id="f_burial"/></div>
       </div>
     </div>
     <!-- ④ 生平 · 来源(选填,默认折叠) -->
@@ -270,9 +270,9 @@
 </div>
 
 <!-- ?v= 随版本递增,确保部署后浏览器加载最新代码(改版本时同步改这里) -->
-<script src="config.js?v=0.13.1"></script>
-<script type="module" src="db.js?v=0.13.1"></script>
-<script type="module" src="app.js?v=0.13.1"></script>
-<script type="module" src="calendar.js?v=0.13.1"></script>
+<script src="config.js?v=0.14.0"></script>
+<script type="module" src="db.js?v=0.14.0"></script>
+<script type="module" src="app.js?v=0.14.0"></script>
+<script type="module" src="calendar.js?v=0.14.0"></script>
 </body>
 </html>

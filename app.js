@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.13.1";
+const APP_VERSION = "v0.14.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -189,6 +189,8 @@ function renderOverview(){
   });
 }
 function statusPill(s){const m={"确认":"pill-ok","存疑":"pill-warn","待考":"pill-muted","待补":"pill-info"};return s?`<span class="pill ${m[s]||"pill-muted"}">${esc(s)}</span>`:"";}
+// 在世标:是=绿「在世」/否=不显/空或未知=黄「在世未知」(此前空值被当已故,误)
+function aliveTag(p){ return p.alive==="是"?'<span class="tag">在世</span>':(p.alive==="否"?"":'<span class="pill pill-warn">在世未知</span>'); }
 function personCard(p){
   const c=el("div","card"); c.onclick=()=>openDetail(p);
   const living=p.alive==="是", hide=state.share&&living;
@@ -200,7 +202,7 @@ function personCard(p){
     meta2=[p.residence,p.occupation,p.father_note].filter(Boolean).join(" · ");
   }
   c.innerHTML=`<div class="card-row">${thumb}<div class="card-main">`
-    +`<div class="nm">${esc(p.name||"(无名)")} ${living?'<span class="tag">在世</span>':""} ${statusPill(p.status)}${state.relCount[p.id]?`<span class="relcount" title="关系数,点开看关系网">关系 ${state.relCount[p.id]}</span>`:""}</div>`
+    +`<div class="nm">${esc(p.name||"(无名)")} ${aliveTag(p)} ${statusPill(p.status)}${state.relCount[p.id]?`<span class="relcount" title="关系数,点开看关系网">关系 ${state.relCount[p.id]}</span>`:""}</div>`
     +(sub?`<div class="sub">${esc(sub)}</div>`:"")+(meta2?`<div class="meta2">${esc(meta2)}</div>`:"")
     +`</div></div>`;
   return c;
@@ -478,6 +480,15 @@ function renderHealth(){
   sec("⑨ 可回填另一方父母边", bf, d=>{ const role=d.otherType==="mother"?"母":"父"; const div=el("div","hitem");
     div.innerHTML=`<a class="plink" data-pid="${esc(d.child.id)}">${esc(d.child.name||d.child.id)}</a> <span class="hint">缺${role}边,推定为「${esc(d.coParent.name||"")}」(${esc((byId(d.parentId)||{}).name||"")} 的唯一配偶)</span>`; return div; }, "pill-info");
   if(state.canEdit && bf.length){ const b=el("button","btn btn-sm btn-primary","一键回填预览…"); b.style.marginTop=".4rem"; b.onclick=openBackfillDialog; if(box.lastChild) box.lastChild.appendChild(b); }
+  // ⑩ 在世状态空白:未填「在世」的人(图谱/卡片显黄「未知」)。可一键统一设为「是」(可逐条撤销)
+  const aliveBlank=state.persons.filter(p=>!p.deleted && !(p.alive||"").trim());
+  sec("⑩ 在世状态空白(未知)", aliveBlank, p=>plink(p,"未填在世,显示为「未知」"), "pill-info");
+  if(state.canEdit && aliveBlank.length){ const b=el("button","btn btn-sm btn-primary",`把空白在世统一设为「是」(${aliveBlank.length})`); b.style.marginTop=".4rem";
+    b.onclick=async()=>{ if(!confirm(`把 ${aliveBlank.length} 位「在世」为空的人统一标为「是」?可在操作历史逐条撤销。`)) return; b.disabled=true; b.textContent="处理中…";
+      let ok=0; const fails=[]; for(const p of aliveBlank){ try{ await api("PUT","/api/persons/"+encodeURIComponent(p.id),{alive:"是"}); ok++; }catch(e){ fails.push((p.name||p.id)+":"+e.message); } }
+      await reloadPersons(); await refreshRelCount(); renderHeader(); renderOverview(); renderHealth();
+      if(fails.length) alert(`已改 ${ok} 条,失败 ${fails.length}:\n`+fails.join("\n")); };
+    if(box.lastChild) box.lastChild.appendChild(b); }
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });   // 先看详情(含关系列表),编辑走详情里「编辑」
   box.querySelectorAll(".spConvBtn").forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openSpouseConverter(b.dataset.pid); });
   box.querySelectorAll(".mergebtn").forEach(b=>b.onclick=()=>{ const g=h.dupName.find(x=>x.name===b.dataset.name); if(g) openMergeDialog(g.list); });
@@ -537,7 +548,7 @@ async function openDetail(p){
     ? `<div class="dphoto-wrap"><img class="dphoto" loading="lazy" src="${esc(window.photoUrl(p.photo))}">${media.length>1?`<span class="dphoto-count">📷 ${media.length}</span>`:""}</div>`
     : `<div class="dphoto noimg">${esc((p.name||"?").slice(-1))}</div>`;
   let html=`<div class="dhead">${photo}<div class="dhead-main"><div class="dname">${esc(p.name||"(无名)")}</div>`
-    +`<div class="dpills">${(p.char_gen&&p.char_gen!=="—")?`<span class="tag">${esc(p.char_gen)}字辈</span>`:""}<span class="tag">第${genStr(p.id)}代</span>${living?'<span class="tag">在世</span>':""} ${statusPill(p.status)}</div></div></div>`;
+    +`<div class="dpills">${(p.char_gen&&p.char_gen!=="—")?`<span class="tag">${esc(p.char_gen)}字辈</span>`:""}<span class="tag">第${genStr(p.id)}代</span>${aliveTag(p)} ${statusPill(p.status)}</div></div></div>`;
   if(share){ box.innerHTML=html+`<p class="note">分享模式:在世亲属仅显示姓名/字辈/世代,其余隐藏。</p>`; $("#detailMask").classList.add("open"); return; }
 
   const chain=ancestorChain(p);
@@ -549,9 +560,9 @@ async function openDetail(p){
 
   const rows=[];
   const R=(k,v)=>{ if(v) rows.push(`<div class="drow"><span class="dk">${k}</span><span class="dv">${esc(v)}</span></div>`); };
-  R("生", [p.birth, p.birth_lunar&&("农历 "+p.birth_lunar), p.birth_time].filter(Boolean).join(" · "));
-  R("卒", [p.death, p.death_lunar&&("农历 "+p.death_lunar)].filter(Boolean).join(" · "));
-  R("出生地", p.birth_place); R("葬地", p.burial);
+  R("出生日期", [p.birth, p.birth_lunar&&("农历 "+p.birth_lunar), p.birth_time].filter(Boolean).join(" · "));
+  R("出生地", p.birth_place);
+  if(p.alive==="否"){ R("卒", [p.death, p.death_lunar&&("农历 "+p.death_lunar)].filter(Boolean).join(" · ")); R("葬地", p.burial); }   // 卒/葬仅在「已故」时显示
   R("字号", p.alias); R("性别", p.sex); R("学历/职业", p.occupation); R("居地/迁徙", p.residence);
   if(rows.length) html+=`<div class="dgrid">${rows.join("")}</div>`;
   // 关系(父/母/配偶/子女/社交…)统一收到下方「关系网」列表;上方只留个人信息 + 直系链
@@ -847,7 +858,7 @@ function openEdit(p, prefill){
   $("#modalTitle").textContent=p?("编辑:"+(p.name||p.id)):"添加人物";
   $("#delBtn").style.display=p?"inline-block":"none";
   $("#modalErr").textContent="";
-  const v=p||prefill||{status:"待考"};
+  const v=p||Object.assign({status:"待考",alive:"是"},prefill||{});   // 新建默认在世=是(prefill 可覆盖)
   FORM_KEYS.forEach(k=>{ const f=$("#f_"+k); if(f) f.value=v[k]!=null?v[k]:""; });
   $("#idField").style.display=p?"":"none";          // 新建时隐藏自动ID那格,保存后再显示
   fillFatherSelect(p?p.id:null, p?(state.fatherOf[p.id]||""):"");
@@ -860,11 +871,13 @@ function openEdit(p, prefill){
     $("#initRelObj").textContent="此人";
     $("#initRelWrap").style.display="";
   }
-  $("#charGenHint").textContent=""; charGenAuto(); initRelAuto();
+  $("#charGenHint").textContent=""; charGenAuto(); initRelAuto(); toggleDeathFields();
   $("#mask").classList.add("open");
   if(!p) setTimeout(()=>{ const n=$("#f_name"); if(n) n.focus(); }, 60);
 }
 function closeModal(){ $("#mask").classList.remove("open"); state.editing=null; }
+// 卒/葬字段仅在「在世=否」时显示(是/空=隐藏);随 f_alive 切换
+function toggleDeathFields(){ const dead=$("#f_alive")&&$("#f_alive").value==="否"; document.querySelectorAll(".death-field").forEach(e=>{ e.style.display=dead?"":"none"; }); }
 function collectForm(){ const d={}; FORM_KEYS.forEach(k=>{ const f=$("#f_"+k); if(f) d[k]=f.value.trim(); }); return d; }  // 父亲改走关系边,不再写 father_id 列
 // 对账父亲:表单选的父 与 当前 father 边 不同则 删旧边+建新边(单一真源=关系图)
 async function reconcileFatherEdge(childId, newFatherId){
@@ -1008,14 +1021,14 @@ async function renderGraph(){
     const onPath=!!(pathSet&&pathSet.has(p.id)), isCenter=p.id===state.graphCenter;
     return { id:p.id, name:p.name||"(无名)", symbolSize:(onPath||isCenter?12:0)+Math.min(44,16+(deg[p.id]||0)*4),
       value:(p.char_gen&&p.char_gen!=="—"?p.char_gen+"字辈·":"")+"第"+genStr(p.id)+"代",
-      itemStyle:{ color:p.alive==="是"?"#10b981":"#64748b", opacity:dimNode(p.id)?0.18:1, borderColor:isCenter?"#dc2626":(onPath?"#f59e0b":"transparent"), borderWidth:(isCenter||onPath)?3:0 },
+      itemStyle:{ color:p.alive==="是"?"#10b981":(p.alive==="否"?"#64748b":"#f59e0b"), opacity:dimNode(p.id)?0.18:1, borderColor:isCenter?"#dc2626":(onPath?"#f59e0b":"transparent"), borderWidth:(isCenter||onPath)?3:0 },
       label:{ show: !pathSet || onPath } };
   });
   const nodeIds=new Set(nodes.map(n=>n.id));
   const links=edges.filter(r=>nodeIds.has(r.from_id)&&nodeIds.has(r.to_id)).map(r=>{ const t=tmap[r.type]||{}, onP=!!(pathEdge&&pathEdge.has(r.from_id+"|"+r.to_id));
     return { source:r.from_id, target:r.to_id, value:t.label_zh||r.type,
       lineStyle:{color:onP?"#f59e0b":(t.color||"#94a3b8"),width:onP?4:1.5,curveness:0.06,opacity:pathSet?(onP?1:0.1):0.72}, symbol:r.directed?["none","arrow"]:["none","none"], symbolSize:onP?10:7 }; });
-  const legend=$("#graphLegend"); if(legend) legend.innerHTML=`<span class="leg"><i style="background:#10b981;width:10px;height:10px;border-radius:50%"></i>在世</span><span class="leg"><i style="background:#64748b;width:10px;height:10px;border-radius:50%"></i>已故</span>`+(state.graphCenter?`<span class="leg" style="color:#dc2626">● 中心(${esc((byId(state.graphCenter)||{}).name||"")}/${state.graphHops}跳)</span>`:"")+types.map(t=>`<span class="leg"><i style="background:${esc(t.color)}"></i>${esc(t.label_zh)}</span>`).join("");
+  const legend=$("#graphLegend"); if(legend) legend.innerHTML=`<span class="leg"><i style="background:#10b981;width:10px;height:10px;border-radius:50%"></i>在世</span><span class="leg"><i style="background:#64748b;width:10px;height:10px;border-radius:50%"></i>已故</span><span class="leg"><i style="background:#f59e0b;width:10px;height:10px;border-radius:50%"></i>未知</span>`+(state.graphCenter?`<span class="leg" style="color:#dc2626">● 中心(${esc((byId(state.graphCenter)||{}).name||"")}/${state.graphHops}跳)</span>`:"")+types.map(t=>`<span class="leg"><i style="background:${esc(t.color)}"></i>${esc(t.label_zh)}</span>`).join("");
   box.innerHTML=""; box.style.height="66vh";
   if(_graphChart){ try{_graphChart.dispose();}catch(e){} }
   _graphChart=echarts.init(box);
@@ -1034,7 +1047,7 @@ window.addEventListener("resize", ()=>{ const v=document.getElementById("view-gr
 const ROSTER_COLS = [
   {k:"name",label:"姓名"},{k:"gen",label:"世代"},{k:"char_gen",label:"字辈"},
   {k:"sex",label:"性别"},{k:"alive",label:"在世"},{k:"rel_count",label:"关系数"},{k:"lineage",label:"族谱"},
-  {k:"birth",label:"生年"},{k:"birth_lunar",label:"农历生"},{k:"birth_time",label:"出生时间"},{k:"death",label:"卒年"},
+  {k:"birth",label:"出生日期"},{k:"birth_lunar",label:"农历生"},{k:"birth_time",label:"出生时间"},{k:"death",label:"卒年"},
   {k:"birth_place",label:"出生地"},{k:"occupation",label:"学历/职业"},{k:"residence",label:"居地"},{k:"burial",label:"葬地"},
   {k:"spouse",label:"配偶(原始记载)"},{k:"contact",label:"联系方式"},{k:"address",label:"住址"},
   {k:"status",label:"状态"},{k:"note",label:"备注"},{k:"id",label:"ID"}
@@ -1298,6 +1311,7 @@ $("#gc_clear")&&($("#gc_clear").onclick=()=>{ state.graphCenter=""; state.pathA=
 $("#f_father_id").onchange=charGenAuto;
 $("#f_rel_person").onchange=initRelAuto;
 $("#f_rel_type").onchange=initRelAuto;
+$("#f_alive")&&($("#f_alive").onchange=toggleDeathFields);
 $("#f_name").oninput=()=>{ const o=$("#initRelObj"); if(o) o.textContent=($("#f_name").value.trim())||"此人"; };
 // Esc 关闭最上层弹窗(此前无键盘退出)
 document.addEventListener("keydown", e=>{
