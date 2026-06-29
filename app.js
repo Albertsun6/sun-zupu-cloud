@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.28.0";
+const APP_VERSION = "v0.28.1";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -167,7 +167,7 @@ function renderPeopleFilter(count){
       const apply=()=>{ state.q=rs.value; renderPeople(); refocus("#peopleSearch"); recordSearchDebounced(); };
       rs.oninput=e=>{ if(e.isComposing) return; apply(); };          // 拼音组合中不重渲染(否则销毁输入框打断输入法)
       rs.oncompositionend=apply;
-      rs.onkeydown=e=>{ if(e.key==="Enter"){ pushRecentSearch(rs.value); renderPeople(); refocus("#peopleSearch"); } }; } }
+      rs.onkeydown=e=>{ if(e.key==="Enter" && !e.isComposing){ state.q=rs.value; pushRecentSearch(rs.value); renderPeople(); refocus("#peopleSearch"); } }; } }   // 拼音用回车选词时 isComposing 仍为真→不当搜索提交;真回车先同步 state.q 防重渲染清空
   fb.querySelectorAll(".rs-chip").forEach(b=>b.onclick=()=>{ state.q=b.dataset.q; pushRecentSearch(state.q); renderPeople(); });
   { const rc=fb.querySelector(".rs-clear"); if(rc) rc.onclick=()=>{ clearRecentSearches(); renderPeople(); }; }
   fb.querySelectorAll(".cf-field").forEach(s=>s.onchange=()=>{ state.customFilters[+s.dataset.i].field=s.value; renderPeople(); });
