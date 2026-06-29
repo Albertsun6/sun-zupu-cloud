@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.22.2";
+const APP_VERSION = "v0.22.3";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1264,13 +1264,17 @@ function renderRoster(){
     const cur=new Set(rosterCols()); cb.checked?cur.add(cb.dataset.col):cur.delete(cb.dataset.col);
     localStorage.setItem("roster_cols", JSON.stringify(ROSTER_COLS.filter(c=>cur.has(c.k)).map(c=>c.k))); renderRoster(); });
   const refocus=sel=>{ const e2=document.querySelector(sel); if(e2){ const v=e2.value; e2.focus(); try{e2.setSelectionRange(v.length,v.length);}catch(_){} } };
-  { const rs=$("#rosterSearch"); if(rs){ rs.oninput=()=>{ state.q=rs.value; const top=$("#search"); if(top)top.value=rs.value; renderRoster(); refocus("#rosterSearch"); recordSearchDebounced(); };
+  { const rs=$("#rosterSearch"); if(rs){
+      const apply=()=>{ state.q=rs.value; const top=$("#search"); if(top)top.value=rs.value; renderRoster(); refocus("#rosterSearch"); recordSearchDebounced(); };
+      rs.oninput=e=>{ if(e.isComposing) return; apply(); };          // 拼音组合中不重渲染(否则销毁输入框、打断输入法);提交后的非组合 input 才过滤
+      rs.oncompositionend=apply;                                     // 选词结束:用提交的中文过滤
       rs.onkeydown=e=>{ if(e.key==="Enter"){ pushRecentSearch(rs.value); renderRoster(); refocus("#rosterSearch"); } }; } }
   box.querySelectorAll(".rs-chip").forEach(b=>b.onclick=()=>{ state.q=b.dataset.q; const top=$("#search"); if(top)top.value=state.q; pushRecentSearch(state.q); renderRoster(); });
   { const rc=box.querySelector(".rs-clear"); if(rc) rc.onclick=()=>{ clearRecentSearches(); renderRoster(); }; }
   box.querySelectorAll(".cf-field").forEach(s=>s.onchange=()=>{ state.customFilters[+s.dataset.i].field=s.value; renderRoster(); });
   box.querySelectorAll(".cf-op").forEach(s=>s.onchange=()=>{ state.customFilters[+s.dataset.i].op=s.value; renderRoster(); });
-  box.querySelectorAll(".cf-val").forEach(inp=>inp.oninput=()=>{ const i=+inp.dataset.i; state.customFilters[i].val=inp.value; renderRoster(); refocus('.cf-val[data-i="'+i+'"]'); });
+  box.querySelectorAll(".cf-val").forEach(inp=>{ const apply=()=>{ const i=+inp.dataset.i; state.customFilters[i].val=inp.value; renderRoster(); refocus('.cf-val[data-i="'+i+'"]'); };
+    inp.oninput=e=>{ if(e.isComposing) return; apply(); }; inp.oncompositionend=apply; });   // 同样:拼音组合中不打断
   box.querySelectorAll(".cf-del").forEach(b=>b.onclick=()=>{ state.customFilters.splice(+b.dataset.i,1); renderRoster(); });
   { const a=$("#cfAdd"); if(a) a.onclick=()=>{ (state.customFilters=state.customFilters||[]).push({field:ROSTER_COLS[0].k,op:"contains",val:""}); renderRoster(); }; }
   { const c=$("#cfClear"); if(c) c.onclick=()=>{ state.q=""; const top=$("#search"); if(top)top.value=""; state.customFilters=[]; renderRoster(); }; }
