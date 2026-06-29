@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.21.0";
+const APP_VERSION = "v0.21.1";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -927,10 +927,27 @@ async function aiNormalizeDates(list){
   const r=await fetch("/api/normalize-dates",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({dates:list}) });
   const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j.results||[];
 }
-// 把 AI 拆出的结构化字段 → {birth(公历) / birth_lunar(农历) / birth_time(时辰)},农历↔公历用万年历(lunar-javascript)精确换算
-function resolveDate(r){
-  const out={birth:"",birth_lunar:"",birth_time:""}, p2=n=>String(n).padStart(2,"0"), LC=window.LUNARCONV;
-  if(r.time){ const m=String(r.time).match(/^(\d{1,2}):(\d{1,2})$/); if(m && +m[1]<=23 && LC){ out.birth_time=`${+m[1]}:${p2(+m[2])} ${LC.shichenOf(+m[1])}`; } else out.birth_time=String(r.time); }
+const _SHICHEN12=["子","丑","寅","卯","辰","巳","午","未","申","酉","戌","亥"];
+const _shichenOf = h => (window.LUNARCONV&&window.LUNARCONV.shichenOf)?window.LUNARCONV.shichenOf(h):(_SHICHEN12[Math.floor(((h+1)%24)/2)]+"时");
+// 从任意中文/数字串抽出生时间 → "H:MM 时辰";抽不到返回 ""。纯客户端规则,稳健,不依赖 AI 的格式。
+function extractTime(raw){
+  const s=String(raw||""); if(!s) return "";
+  const m=s.match(/(凌晨|清晨|早晨|一早|大早|早上|早|上午|中午|晌午|晌|下午|傍晚|黄昏|晚上|晚|夜里|夜间|半夜|子夜|夜)?\s*(\d{1,2})\s*[:：时點点]\s*(半|[0-5]?\d)?\s*分?/);
+  if(m && +m[2]<=23){
+    let h=+m[2], min=0; if(m[3]==="半") min=30; else if(m[3]) min=Math.min(59,+m[3]);
+    const pd=m[1]||"";
+    if(/下午|傍晚|黄昏|晚|夜/.test(pd) && h>=1 && h<=11) h+=12;            // 下午/晚 1–11 → +12
+    else if(/凌晨|清晨|早晨|半夜|子夜|早|上午/.test(pd) && h===12) h=0;    // 凌晨/上午 12 点 → 0
+    h=((h%24)+24)%24;
+    return `${h}:${String(min).padStart(2,"0")} ${_shichenOf(h)}`;
+  }
+  const sc=s.match(/([子丑寅卯辰巳午未申酉戌亥])时/); if(sc) return sc[1]+"时";   // 时辰名
+  return "";
+}
+// AI 拆出的结构化字段(+原文)→ {birth(公历)/birth_lunar(农历)/birth_time(时辰)};农历↔公历用万年历精确换算,时间用客户端规则抽(原文优先、AI 兜底)
+function resolveDate(r, raw){
+  r=r||{}; const out={birth:"",birth_lunar:"",birth_time:""}, p2=n=>String(n).padStart(2,"0"), LC=window.LUNARCONV;
+  out.birth_time = extractTime(raw||"") || extractTime(r.time||"");
   const y=r.year, m=r.month, d=r.day; if(!y) return out;
   if(r.is_lunar){
     if(m&&d&&LC&&LC.ready){ const c=LC.lunarToSolar(y,m,d,!!r.leap); if(c){ out.birth=c.solar; out.birth_lunar=c.lunar; return out; } }
@@ -946,8 +963,8 @@ async function onBirthBlur(){
   const r=normalizeDate(raw);
   if(r.ok){ if(r.value&&r.value!==raw){ inp.value=r.value; if(hint){ hint.textContent="已规范"; hint.style.color="#047857"; } } else if(hint){ hint.textContent=""; } return; }
   if(hint){ hint.textContent="识别中…"; hint.style.color="#64748b"; }
-  try{ const g=(await aiNormalizeDates([raw]))[0]; const rd=g?resolveDate(g):null;
-    if(rd&&rd.birth){ inp.value=rd.birth;
+  try{ const g=(await aiNormalizeDates([raw]))[0]; const rd=resolveDate(g, raw);
+    if(rd.birth||rd.birth_lunar||rd.birth_time){ if(rd.birth) inp.value=rd.birth;
       const lf=$("#f_birth_lunar"); if(lf&&rd.birth_lunar&&!lf.value.trim()) lf.value=rd.birth_lunar;
       const tf=$("#f_birth_time");  if(tf&&rd.birth_time &&!tf.value.trim()) tf.value=rd.birth_time;
       if(hint){ hint.textContent="已按万年历拆为 公历/农历/时辰"; hint.style.color="#047857"; } }
@@ -967,9 +984,9 @@ async function openDateNormalizer(){
   mask.classList.add("open");
   if(needAI.length){
     try{ const res=await aiNormalizeDates(needAI.map(x=>x.raw)); const mp={}; res.forEach(r=>{ mp[r.input]=r; });
-      needAI.forEach(x=>{ const g=mp[x.raw]; const rd=g?resolveDate(g):null;
-        if(rd&&rd.birth){ const patch={}, desc=[];
-          if(rd.birth!==x.raw){ patch.birth=rd.birth; } desc.push("公历 "+rd.birth);
+      needAI.forEach(x=>{ const g=mp[x.raw]; const rd=resolveDate(g, x.raw);
+        if(rd.birth||rd.birth_lunar||rd.birth_time){ const patch={}, desc=[];
+          if(rd.birth && rd.birth!==x.raw){ patch.birth=rd.birth; } if(rd.birth) desc.push("公历 "+rd.birth);
           if(rd.birth_lunar && _messyDate(x.p.birth_lunar)){ patch.birth_lunar=rd.birth_lunar; desc.push("农历 "+rd.birth_lunar); }
           if(rd.birth_time  && _messyDate(x.p.birth_time)){  patch.birth_time =rd.birth_time;  desc.push("🕐"+rd.birth_time); }
           if(Object.keys(patch).length) rows.push({p:x.p,raw:x.raw,patch,desc:desc.join(" · "),src:"AI+万年历",ok:true});
@@ -1295,10 +1312,10 @@ async function buildPreviewFromIncoming(incList){
     let res=[]; try{ res=await aiNormalizeDates([...aiNeed]); }catch(e){}
     const mp={}; res.forEach(r=>{ if(r&&r.input) mp[r.input]=r; });
     const messy = s => !(s||"").trim() || /\d{4}|时|分/.test(s);   // 空 或 含年/时=DeepSeek 原串,可被万年历清洗版覆盖
-    list.forEach(inc=>{ if(!inc._braw) return; const g=mp[inc._braw]; const rd=g?resolveDate(g):null;
-      inc.birth = (rd&&rd.birth) || inc._braw;                              // 公历(识别不出保留原文)
-      if(rd&&rd.birth_lunar && messy(inc.birth_lunar)) inc.birth_lunar=rd.birth_lunar;   // 农历(清洗版覆盖原始串)
-      if(rd&&rd.birth_time  && messy(inc.birth_time))  inc.birth_time =rd.birth_time;    // 时辰
+    list.forEach(inc=>{ if(!inc._braw) return; const g=mp[inc._braw]; const rd=resolveDate(g, inc._braw);
+      inc.birth = rd.birth || inc._braw;                                   // 公历(识别不出保留原文)
+      if(rd.birth_lunar && messy(inc.birth_lunar)) inc.birth_lunar=rd.birth_lunar;   // 农历(清洗版覆盖原始串)
+      if(rd.birth_time  && messy(inc.birth_time))  inc.birth_time =rd.birth_time;    // 时辰
       delete inc._braw; });
   }
   _imp.preview = list.map(matchIncoming);
@@ -1402,8 +1419,8 @@ async function aiCreateAll(){
   // 先把复杂出生日期(农历/年号/带时辰)用 AI+万年历 拆成 公历/农历/时辰
   const need=new Set(); valid.forEach(d=>{ const b=(d.birth||"").trim(); if(!b) return; const nd=normalizeDate(b); if(nd.ok&&nd.value){ d.birth=nd.value; } else { d._braw=b; need.add(b); } });
   if(need.size){ try{ const res=await aiNormalizeDates([...need]); const mp={}; res.forEach(r=>{ if(r&&r.input) mp[r.input]=r; });
-    valid.forEach(d=>{ if(!d._braw) return; const g=mp[d._braw]; const rd=g?resolveDate(g):null;
-      d.birth=(rd&&rd.birth)||d._braw; if(rd&&rd.birth_lunar&&_messyDate(d.birth_lunar))d.birth_lunar=rd.birth_lunar; if(rd&&rd.birth_time&&_messyDate(d.birth_time))d.birth_time=rd.birth_time; delete d._braw; }); }catch(e){} }
+    valid.forEach(d=>{ if(!d._braw) return; const g=mp[d._braw]; const rd=resolveDate(g, d._braw);
+      d.birth=rd.birth||d._braw; if(rd.birth_lunar&&_messyDate(d.birth_lunar))d.birth_lunar=rd.birth_lunar; if(rd.birth_time&&_messyDate(d.birth_time))d.birth_time=rd.birth_time; delete d._braw; }); }catch(e){} }
   let ok=0, fail=0;
   for(const d of valid){ try{ await api("POST","/api/persons",{ ...d, status:"待考" }); ok++; }catch(e){ fail++; } }
   btn.textContent="全部新建为人物";

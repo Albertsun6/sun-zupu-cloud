@@ -42,16 +42,41 @@ export async function onRequestPost({ request, env }){
     const model = env.DEEPSEEK_MODEL || "deepseek-v4-flash";
     const base = (env.DEEPSEEK_BASE || "https://api.deepseek.com").replace(/\/+$/,"");
 
-    const dres = await fetch(base+"/chat/completions", {
-      method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+key },
-      body: JSON.stringify({ model, stream:false, temperature:0,
-        messages:[{ role:"system", content:SYSTEM }, { role:"user", content: JSON.stringify(dates) }] }),
-    });
-    if(!dres.ok){ const t=await dres.text(); return json({ error:"DeepSeek 调用失败 ("+dres.status+"): "+t.slice(0,300) }, 502); }
-    const data = await dres.json();
-    const content = (data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||"";
-    const parsed = extractJson(content);
-    if(!parsed || !Array.isArray(parsed.results)) return json({ error:"AI 未返回有效结果", raw: content.slice(0,500) }, 502);
+    // 调 DeepSeek(强制 JSON 输出);校验结构,不合格就把错误反馈给 AI 让它改正,最多 3 轮
+    async function callLLM(messages){
+      const dres = await fetch(base+"/chat/completions", {
+        method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+key },
+        body: JSON.stringify({ model, stream:false, temperature:0, response_format:{ type:"json_object" }, messages }),
+      });
+      if(!dres.ok){ const t=await dres.text(); throw new Error("DeepSeek 调用失败 ("+dres.status+"): "+t.slice(0,300)); }
+      const data = await dres.json();
+      return (data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||"";
+    }
+    // 校验:必须 {results:[...]},长度=输入数,每项 input 为字符串、year 为 null 或 1000-2200 整数、month/day/time 类型合法
+    function validate(p){
+      if(!p || !Array.isArray(p.results)) return "顶层必须是 {\"results\":[...]} 且 results 是数组";
+      if(p.results.length !== dates.length) return `results 长度应为 ${dates.length},实际 ${p.results.length}`;
+      for(let i=0;i<p.results.length;i++){ const r=p.results[i];
+        if(typeof r!=="object"||r===null) return `第 ${i+1} 项不是对象`;
+        if(typeof r.input!=="string"||!r.input.trim()) return `第 ${i+1} 项缺 input(必须回显原文)`;
+        if(r.year!=null && !(Number.isInteger(r.year)&&r.year>=1000&&r.year<=2200)) return `第 ${i+1} 项 year 必须是 null 或 1000-2200 的公历年整数(不要带"年"字)`;
+        if(r.month!=null && !(Number.isInteger(r.month)&&r.month>=1&&r.month<=12)) return `第 ${i+1} 项 month 必须 null 或 1-12 整数`;
+        if(r.day!=null && !(Number.isInteger(r.day)&&r.day>=1&&r.day<=31)) return `第 ${i+1} 项 day 必须 null 或 1-31 整数`;
+        if(r.time!=null && typeof r.time!=="string") return `第 ${i+1} 项 time 必须是字符串`;
+      }
+      return "";
+    }
+    let messages=[{ role:"system", content:SYSTEM }, { role:"user", content: JSON.stringify(dates) }];
+    let parsed=null, lastErr="", lastRaw="";
+    for(let attempt=0; attempt<3; attempt++){
+      let content; try{ content=await callLLM(messages); }catch(e){ return json({ error:String(e.message||e) }, 502); }
+      lastRaw=content; const p=extractJson(content); const err=validate(p);
+      if(!err){ parsed=p; break; }
+      lastErr=err;
+      messages.push({ role:"assistant", content });   // 把上次输出与错误反馈回去,要求改正
+      messages.push({ role:"user", content:`你上次的输出不合格:${err}。请严格按 system 要求【只输出一个 JSON 对象】,{"results":[...]} 长度必须=${dates.length},顺序与输入一致,每项含 input(回显原文)/is_lunar/year(公历年整数或null)/month/day/leap/time/ok。不要任何解释或 markdown。` });
+    }
+    if(!parsed) return json({ error:"AI 多次未返回合格结构:"+lastErr, raw:lastRaw.slice(0,400) }, 502);
     // 按 input 对齐(防 AI 漏条/乱序);未命中的标 ok=false
     const map = {}; parsed.results.forEach(r=>{ if(r&&typeof r.input==="string") map[r.input.trim()] = r; });
     const num = (v,lo,hi) => { const n=parseInt(v); return (Number.isFinite(n)&&n>=lo&&n<=hi)?n:null; };
