@@ -19,7 +19,7 @@ function openLightbox(src){ if(!src) return; let m=document.getElementById("ligh
   m.innerHTML=`<img src="${esc(src)}" alt="">`; m.classList.add("open"); }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.12.2";
+const APP_VERSION = "v0.12.3";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -528,9 +528,9 @@ async function openDetail(p){
   if(p.deeds) html+=`<div class="dsec"><div class="dsec-h">事迹</div><div class="ditem">${esc(p.deeds)}</div></div>`;
   const m3=[p.source&&("来源:"+p.source), p.note&&("备注:"+p.note)].filter(Boolean);
   if(m3.length) html+=`<div class="dsec hint" style="margin-top:.6rem">${m3.map(esc).join("<br>")}</div>`;
-  const media=await api("GET","/api/persons/"+encodeURIComponent(p.id)+"/media").catch(()=>[]);
+  const media=(await api("GET","/api/persons/"+encodeURIComponent(p.id)+"/media").catch(()=>[])).filter(md=>md.path!==p.photo);  // 主图已作头像,相册不再重复显示
   if(media.length){
-    html+=`<div class="dsec"><div class="dsec-h">相册</div><div class="dalbum">`
+    html+=`<div class="dsec"><div class="dsec-h">相册(其他照片)</div><div class="dalbum">`
       +media.map(md=>`<figure><img loading="lazy" src="${esc(window.photoUrl(md.path))}"><figcaption>${esc(md.caption||"")}</figcaption></figure>`).join("")+`</div></div>`;
   }
   // 关系网(详情页下方 = 关系管理中心:父/母/配偶/子女/社交 全在此整齐列表里增删改)
