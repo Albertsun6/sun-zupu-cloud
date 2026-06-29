@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.26.3";
+const APP_VERSION = "v0.26.4";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -999,6 +999,8 @@ function _cnDay(s){ let m;
   return null; }
 function parseDateParts(raw){
   const s=String(raw||""); const o={is_lunar:false,year:null,month:null,day:null,leap:false};
+  { const t=s.trim(); if(/^\d{4,5}$/.test(t)){ const n=+t; if(n>2200&&n<73510){ const dt=new Date(Date.UTC(1899,11,30)+n*86400000);   // Excel 日期序列号(如 27235=1974-07-25):表格未格式化成日期时被读成纯数字
+    o.year=dt.getUTCFullYear(); o.month=dt.getUTCMonth()+1; o.day=dt.getUTCDate(); return o; } } }
   let m=s.match(/(\d{3,4})\s*年/)||s.match(/(?:^|\D)(\d{4})(?:\D|$)/); if(m&&+m[1]>=1000&&+m[1]<=2200)o.year=+m[1];
   if(o.year==null){ const cm=s.match(/([〇零一二三四五六七八九]{4})\s*年/); if(cm){ const y=+[...cm[1]].map(c=>_CNNUM[c]).join(""); if(y>=1000&&y<=2200)o.year=y; } }
   if(/闰/.test(s))o.leap=true;
@@ -1442,25 +1444,27 @@ function renderImportPreview(){
   const newCount=P.filter(x=>x.target==="__new__").length;
   const rows=P.map((x,i)=>{
     const sum=[x.inc.name,x.inc.sex,x.inc.birth,x.inc.birth_time&&("🕐"+x.inc.birth_time),x.inc.birth_lunar&&("农历:"+x.inc.birth_lunar),x.inc.company].filter(Boolean).join(" · ");
-    const dwarn=x.inc._dateWarn?` <span class="hint" style="color:#dc2626;font-weight:600">⚠ ${esc(x.inc._dateWarn)}</span>`:"";
-    const opts=`<option value="__new__"${x.target==="__new__"?" selected":""}>➕ 新建</option>`+(x.options||[]).map(p=>`<option value="${esc(p.id)}"${x.target===p.id?" selected":""}>${esc(p.name)}·${esc(p.birth||"无生年")}·${esc(p.id)}</option>`).join("");
-    const strat = x.target==="__new__" ? `<span class="hint">新建</span>` : `<select class="imp-strat" data-i="${i}"><option value="merge"${x.strategy==="merge"?" selected":""}>合并·填空</option><option value="overwrite"${x.strategy==="overwrite"?" selected":""}>覆盖</option><option value="skip"${x.strategy==="skip"?" selected":""}>跳过</option></select>`;
-    const warn = x.target==="__new__" ? ''
+    const dwarn=(x.target!=="__skip__"&&x.inc._dateWarn)?` <span class="hint" style="color:#dc2626;font-weight:600">⚠ ${esc(x.inc._dateWarn)}</span>`:"";
+    const opts=`<option value="__new__"${x.target==="__new__"?" selected":""}>➕ 新建</option><option value="__skip__"${x.target==="__skip__"?" selected":""}>🚫 忽略(不导入)</option>`+(x.options||[]).map(p=>`<option value="${esc(p.id)}"${x.target===p.id?" selected":""}>${esc(p.name)}·${esc(p.birth||"无生年")}·${esc(p.id)}</option>`).join("");
+    const strat = x.target==="__new__" ? `<span class="hint">新建</span>` : (x.target==="__skip__" ? `<span class="hint" style="color:#94a3b8">不导入</span>` : `<select class="imp-strat" data-i="${i}"><option value="merge"${x.strategy==="merge"?" selected":""}>合并·填空</option><option value="overwrite"${x.strategy==="overwrite"?" selected":""}>覆盖</option><option value="skip"${x.strategy==="skip"?" selected":""}>跳过</option></select>`);
+    const warn = (x.target==="__new__"||x.target==="__skip__") ? ''
       : ((x.options||[]).length>1 ? ` <span class="hint" style="color:#b45309;font-weight:600">⚠ 多个同名(${(x.options||[]).length}),已默认第一个,务必核对</span>`
         : (x.yearConflict ? ` <span class="hint" style="color:#dc2626;font-weight:600">⚠ 生年不一致(现有 ${esc(((byId(x.target)||{}).birth)||"?")}),可能非同一人,请核对</span>`
           : (!x.byYear ? ' <span class="hint" style="color:#b45309">按姓名匹配(现有缺生年),可填补</span>'
             : ' <span class="hint" style="color:#15803d">✓ 姓名+生年命中</span>')));
     return `<tr><td>${esc(sum)}${dwarn}${warn}</td><td><select class="imp-match" data-i="${i}">${opts}</select></td><td>${strat}</td></tr>`;
   }).join("");
-  mask.innerHTML=`<div class="modal" style="width:min(840px,100%)"><h2>匹配预览(${P.length} 行 · 新建 ${newCount}${_imp.skippedNoName?(" · 空名跳过 "+_imp.skippedNoName):""})</h2>
-    <p class="hint">左=导入数据,中=匹配到谁(可改/选新建),右=命中现有时怎么处理。<b>合并·填空</b>只补空字段(不动已有);<b>覆盖</b>用导入值覆盖;<b>跳过</b>不动。</p>
-    <div style="margin:.3rem 0">命中现有的全部设为: <button class="btn btn-sm" data-all="merge">合并</button> <button class="btn btn-sm" data-all="overwrite">覆盖</button> <button class="btn btn-sm" data-all="skip">跳过</button></div>
+  const skipCount=P.filter(x=>x.target==="__skip__").length;
+  mask.innerHTML=`<div class="modal" style="width:min(840px,100%)"><h2>匹配预览(${P.length} 行 · 新建 ${newCount}${skipCount?(" · 忽略 "+skipCount):""}${_imp.skippedNoName?(" · 空名跳过 "+_imp.skippedNoName):""})</h2>
+    <p class="hint">左=导入数据,中=匹配到谁(可改/新建/<b>忽略不导入</b>),右=命中现有时怎么处理。<b>合并·填空</b>只补空字段(不动已有);<b>覆盖</b>用导入值覆盖;<b>跳过</b>不动。</p>
+    <div style="margin:.3rem 0">命中现有的全部设为: <button class="btn btn-sm" data-all="merge">合并</button> <button class="btn btn-sm" data-all="overwrite">覆盖</button> <button class="btn btn-sm" data-all="skip">跳过</button> <button class="btn btn-sm" data-skipwarn="1" title="把生年不一致/多同名的行全部设为忽略">🚫 忽略全部有警告的</button></div>
     <div style="max-height:50vh;overflow:auto"><table class="roster"><thead><tr><th>导入数据</th><th>匹配到</th><th>处理</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="err" id="impErr"></div>
     <div class="modal-foot"><button class="btn" id="impBack">上一步</button><span class="spacer"></span><button class="btn btn-primary" id="impRun">确认导入</button></div></div>`;
   mask.querySelectorAll(".imp-match").forEach(s=>s.onchange=()=>{ const i=+s.dataset.i; _imp.preview[i].target=s.value; _imp.preview[i].strategy=(s.value==="__new__")?"new":(_imp.preview[i].strategy==="new"?"overwrite":_imp.preview[i].strategy); renderImporter(); });   // 选中现有→默认覆盖(与默认一致)
   mask.querySelectorAll(".imp-strat").forEach(s=>s.onchange=()=>{ _imp.preview[+s.dataset.i].strategy=s.value; });
-  mask.querySelectorAll("[data-all]").forEach(b=>b.onclick=()=>{ _imp.preview.forEach(x=>{ if(x.target!=="__new__") x.strategy=b.dataset.all; }); renderImporter(); });
+  mask.querySelectorAll("[data-all]").forEach(b=>b.onclick=()=>{ _imp.preview.forEach(x=>{ if(x.target!=="__new__"&&x.target!=="__skip__") x.strategy=b.dataset.all; }); renderImporter(); });
+  { const sb=mask.querySelector("[data-skipwarn]"); if(sb) sb.onclick=()=>{ _imp.preview.forEach(x=>{ if(x.yearConflict||(x.options||[]).length>1||x.inc._dateWarn) x.target="__skip__"; }); renderImporter(); }; }   // 一键忽略所有有警告(生年不一致/多同名/两模型分歧)的行
   $("#impBack").onclick=()=>{ _imp.step=2; renderImporter(); };
   $("#impRun").onclick=runImport;
 }
@@ -1470,6 +1474,7 @@ async function runImport(){
   const clean=inc=>{ const o={}; Object.keys(inc).forEach(k=>{ const v=(inc[k]||"").trim(); if(v) o[k]=v; }); return o; };
   for(const x of P){
     try{
+      if(x.target==="__skip__"){ skipped++; continue; }   // 用户选了忽略=完全不导入这行
       if(x.target==="__new__"){ if(!x.nm) continue; await api("POST","/api/persons",{ ...clean(x.inc), status:(x.inc.status||"待考") }); created++; }
       else { const ex=byId(x.target); if(!ex){ fails.push(x.nm+":匹配对象不存在"); continue; }
         if(ex.deleted){ fails.push(x.nm+":目标已在回收站,已跳过"); continue; }   // 防 stale 缓存/并发把回收站里的人改了
