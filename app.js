@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.22.1";
+const APP_VERSION = "v0.22.2";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -186,18 +186,11 @@ function renderCards(){
   $("#shareNote").style.display=state.share?"block":"none";
   const list=state.persons.filter(p=>matchQ(p)&&matchFilter(p)&&(!state.lineage||familiesOf(p.id).includes(state.lineage)));
   const fc=$("#fcount"); if(fc) fc.textContent=(state.q||anyFilter()||state.lineage)?`找到 ${list.length} 人`:`共 ${state.persons.length} 人`;
-  const groups={};
-  list.forEach(p=>{ const g=genOf(p.id); const gkey=(g==null?"—":g); (groups[gkey]=groups[gkey]||[]).push(p); });
-  const keys=Object.keys(groups).sort((a,b)=>gk(a)-gk(b));
-  if(!keys.length){ box.appendChild(el("p","note","无匹配人物。")); return; }
-  keys.forEach(k=>{
-    const blk=el("div","gen-block"); const cg=groups[k][0]?.char_gen;
-    const head = k==="—" ? "未入世系 · 外部人物" : `第 ${esc(k)} 代`;
-    blk.appendChild(el("div","gen-head",head+(cg&&cg!=="—"?` <span class="tag">${esc(cg)}字辈</span>`:"")));
-    const cards=el("div","cards");
-    groups[k].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).forEach(p=>cards.appendChild(personCard(p)));
-    blk.appendChild(cards); box.appendChild(blk);
-  });
+  if(!list.length){ box.appendChild(el("p","note","无匹配人物。")); return; }
+  // 平铺卡片(不按世代分组——世代是孙系概念,不适合混合人群);仍按 世代→排序号 排个顺序,但不显「第N代」头
+  const cards=el("div","cards");
+  list.slice().sort((a,b)=>gk(genOf(a.id))-gk(genOf(b.id))||(a.sort_order||0)-(b.sort_order||0)).forEach(p=>cards.appendChild(personCard(p)));
+  box.appendChild(cards);
 }
 function statusPill(s){const m={"确认":"pill-ok","存疑":"pill-warn","待考":"pill-muted","待补":"pill-info"};return s?`<span class="pill ${m[s]||"pill-muted"}">${esc(s)}</span>`:"";}
 // 在世标:是=绿「在世」/否=不显/空或未知=黄「在世未知」(此前空值被当已故,误)
