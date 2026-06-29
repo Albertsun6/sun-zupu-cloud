@@ -13,9 +13,13 @@ async function getMermaid(){
 const $ = s => document.querySelector(s);
 const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+// 照片点击放大预览(懒建覆盖层,点任意处或 Esc 关闭)
+function openLightbox(src){ if(!src) return; let m=document.getElementById("lightbox");
+  if(!m){ m=el("div","lightbox"); m.id="lightbox"; m.onclick=()=>m.classList.remove("open"); document.body.appendChild(m); }
+  m.innerHTML=`<img src="${esc(src)}" alt="">`; m.classList.add("open"); }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.12.1";
+const APP_VERSION = "v0.12.2";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -392,7 +396,8 @@ function mediaItem(md){
   star.onclick=async()=>{await api("PUT","/api/media/"+md.id,{is_primary:1});await renderMedia(state.editing);await reloadPersons();renderOverview();};
   cap.onchange=async()=>{await api("PUT","/api/media/"+md.id,{caption:cap.value});};
   del.onclick=async()=>{if(!confirm("删除这张照片?"))return;await api("DELETE","/api/media/"+md.id);await renderMedia(state.editing);await reloadPersons();renderOverview();};
-  it.innerHTML=`<img src="${esc(window.photoUrl(md.path))}" alt=""/>`;
+  it.innerHTML=`<img src="${esc(window.photoUrl(md.path))}" alt="" style="cursor:zoom-in"/>`;
+  it.querySelector("img").onclick=()=>openLightbox(window.photoUrl(md.path));
   const ctl=el("div","gctl"); ctl.appendChild(cap); const row=el("div","subrow-line"); row.appendChild(star); row.appendChild(del); ctl.appendChild(row);
   it.appendChild(ctl); return it;
 }
@@ -445,7 +450,7 @@ function renderHealth(){
   sec("⑧ 配偶待整理(原始记载→关系)", pend, p=>{ const d=el("div","hitem");
     d.innerHTML=`<a class="plink" data-pid="${esc(p.id)}">${esc(p.name||p.id)}</a> <span class="hint">原文:${esc(p.spouse)}</span>`
       +(state.canEdit?` <button class="btn btn-sm spConvBtn" data-pid="${esc(p.id)}">整理为配偶</button>`:""); return d; }, "pill-info");
-  box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t){ state.canEdit?openEdit(t):openDetail(t); } });
+  box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });   // 先看详情(含关系列表),编辑走详情里「编辑」
   box.querySelectorAll(".spConvBtn").forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openSpouseConverter(b.dataset.pid); });
   box.querySelectorAll(".mergebtn").forEach(b=>b.onclick=()=>{ const g=h.dupName.find(x=>x.name===b.dataset.name); if(g) openMergeDialog(g.list); });
   box.querySelectorAll(".useGenBtn").forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); const pid=b.dataset.pid;
@@ -557,6 +562,7 @@ async function openDetail(p){
   html+=`<div class="dsec"><div class="dsec-h">关系网(${rels.length}) <button class="btn btn-sm" id="relEgoBtn">🎯 关系圈</button>${state.canEdit?` <button class="btn btn-sm" id="relAddToggle">+ 加关系</button>`:""}</div>${pending}${addForm}<div class="rel-list">${rh}</div></div>`;
   box.innerHTML=html;
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });
+  box.querySelectorAll(".dalbum img, img.dphoto").forEach(im=>{ im.style.cursor="zoom-in"; im.onclick=e=>{ e.stopPropagation(); openLightbox(im.src); }; });
   { const eb=$("#relEgoBtn"); if(eb) eb.onclick=()=>{ state.graphCenter=p.id; state.pathA=""; state.pathB=""; closeDetail(); switchView("graph"); }; }
   { const sb=$("#spConvDetail"); if(sb) sb.onclick=()=>{ closeDetail(); openSpouseConverter(p.id); }; }
   box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?(直接删除,不可恢复;人物本身不受影响)"))return; try{ await window.REL.del(+b.dataset.rid); await reloadPersons(); await refreshRelCount(); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
@@ -649,7 +655,7 @@ function fillFatherSelect(currentId, selected){
 }
 function openEdit(p, prefill){
   state.editing=p?p.id:null;
-  $("#modalTitle").textContent=p?("详情 / 编辑:"+(p.name||p.id)):"添加人物";
+  $("#modalTitle").textContent=p?("编辑:"+(p.name||p.id)):"添加人物";
   $("#delBtn").style.display=p?"inline-block":"none";
   $("#modalErr").textContent="";
   const v=p||prefill||{status:"待考"};
@@ -692,7 +698,7 @@ async function saveModal(){
         if(same.length && !confirm("已有 "+same.length+" 个同名:"+same.map(s=>(s.name)+"(第"+(s.gen||"?")+"代)").join("、")+"。\n同名可能是不同人。仍要创建?")) return; }
       const row=await api("POST","/api/persons",d);
       state.editing=row.id; $("#f_id").value=row.id;
-      $("#modalTitle").textContent="详情 / 编辑:"+(row.name||row.id);
+      $("#modalTitle").textContent="编辑:"+(row.name||row.id);
       $("#delBtn").style.display="inline-block";
       await reconcileFatherEdge(row.id, fsel);
       let extra="";
@@ -867,7 +873,7 @@ function renderRoster(){
     localStorage.setItem("roster_cols", JSON.stringify(ROSTER_COLS.filter(c=>cur.has(c.k)).map(c=>c.k))); renderRoster(); });
   const rk=$("#rosterLineage"); if(rk) rk.onchange=renderRoster;
   box.querySelectorAll("th[data-sk]").forEach(th=>th.onclick=()=>{ const k=th.dataset.sk; _rosterSort=(sk===k)?{k,dir:-dir}:{k,dir:1}; renderRoster(); });
-  box.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{ const p=byId(tr.dataset.pid); if(p){ state.canEdit?openEdit(p):openDetail(p); } });
+  box.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{ const p=byId(tr.dataset.pid); if(p) openDetail(p); });   // 点行看详情(含关系列表),编辑走详情里「编辑」
 }
 
 /* ---------- AI 批量添加(粘贴文字 → DeepSeek 识别 → 草稿审核 → 创建)---------- */
@@ -1101,6 +1107,7 @@ $("#f_rel_type").onchange=initRelAuto;
 $("#f_name").oninput=()=>{ const o=$("#initRelObj"); if(o) o.textContent=($("#f_name").value.trim())||"此人"; };
 // Esc 关闭最上层弹窗(此前无键盘退出)
 document.addEventListener("keydown", e=>{ if(e.key!=="Escape") return;
+  const lb=$("#lightbox"); if(lb&&lb.classList.contains("open")){ lb.classList.remove("open"); return; }   // 先关图片预览
   if($("#mask").classList.contains("open")) closeModal();
   else if($("#detailMask").classList.contains("open")) closeDetail();
   else if($("#aiMask")&&$("#aiMask").classList.contains("open")) $("#aiMask").classList.remove("open");
