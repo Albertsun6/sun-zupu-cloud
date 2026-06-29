@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.26.1";
+const APP_VERSION = "v0.26.2";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -567,7 +567,7 @@ async function openDetail(p){
 
   const rows=[];
   const R=(k,v)=>{ if(v) rows.push(`<div class="drow"><span class="dk">${k}</span><span class="dv">${esc(v)}</span></div>`); };
-  R("出生日期", [p.birth, p.birth_lunar&&("农历 "+p.birth_lunar), p.birth_time].filter(Boolean).join(" · "));
+  R("出生日期", [p.birth, p.birth_lunar&&("农历 "+p.birth_lunar), shengXiaoLabel(p), p.birth_time].filter(Boolean).join(" · "));
   R("出生地", p.birth_place);
   if(p.alive==="否"){ R("卒", [p.death, p.death_lunar&&("农历 "+p.death_lunar)].filter(Boolean).join(" · ")); R("葬地", p.burial); }   // 卒/葬仅在「已故」时显示
   R("字号", p.alias); R("性别", p.sex); R("学历/职业", p.occupation); R("公司", p.company); R("居地/迁徙", p.residence);
@@ -948,6 +948,15 @@ const _SHICHEN12=["子","丑","寅","卯","辰","巳","午","未","申","酉","�
 const _shichenOf = h => (window.LUNARCONV&&window.LUNARCONV.shichenOf)?window.LUNARCONV.shichenOf(h):(_SHICHEN12[Math.floor(((h+1)%24)/2)]+"时");
 const _SHENGXIAO=["鼠","牛","虎","兔","龙","蛇","马","羊","猴","鸡","狗","猪"];
 const _shengXiao = y => y?_SHENGXIAO[(((y-4)%12)+12)%12]:"";   // 按公历年近似生肖(精确随立春的由 LUNARCONV 给)
+// 展示用属相:birth_lunar 已含则不重复;否则从 公历全日期(精确,经万年历)或仅年份(近似)算出 "属X"
+function shengXiaoLabel(p){
+  if(/属[鼠牛虎兔龙蛇马羊猴鸡狗猪]/.test((p.birth_lunar||"")+" "+(p.birth||""))) return "";
+  const LC=window.LUNARCONV; let sx="";
+  const bm=(p.birth||"").match(/^(\d{3,4})-(\d{1,2})-(\d{1,2})$/);
+  if(bm && LC && LC.ready){ const c=LC.solarToLunar(+bm[1],+bm[2],+bm[3]); const mm=c&&(c.lunar||"").match(/属([鼠牛虎兔龙蛇马羊猴鸡狗猪])/); if(mm) sx=mm[1]; }
+  if(!sx){ const ym=(p.birth||"").match(/\d{4}/)||(p.birth_lunar||"").match(/\d{4}/); if(ym) sx=_shengXiao(+ym[0]); }
+  return sx?("属"+sx):"";
+}
 // 从任意中文/数字串抽出生时间 → "H:MM 时辰" 或 "X时";抽不到返回 ""。纯客户端规则(阿拉伯+中文数字+时辰名+早晚上下午/半夜判时段),不依赖 AI 格式。
 const _CNNUM={零:0,"〇":0,一:1,二:2,两:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};
 function _cnNum(s){ s=String(s||"").trim(); if(!s)return null; if(/^\d+$/.test(s))return +s;
@@ -1276,7 +1285,9 @@ function pushRecentSearch(term){ term=(term||"").trim(); if(term.length<1) retur
 function clearRecentSearches(){ try{ localStorage.removeItem("search_recent"); }catch(e){} }
 let _searchRecTimer=null;
 function recordSearchDebounced(){ clearTimeout(_searchRecTimer); _searchRecTimer=setTimeout(()=>{ pushRecentSearch(state.q); }, 1200); }   // 停止输入 1.2s 后记一条(避免记下半截词)
-function cellVal(p,k){ return k==="rel_count"?(state.relCount[p.id]||0):(k==="gen"?(genOf(p.id)??""):(k==="lineage"?familiesOf(p.id).join(" / "):(p[k]==null?"":p[k]))); }
+function cellVal(p,k){
+  if(k==="birth_lunar"){ const bl=(p.birth_lunar||"").trim(), sx=shengXiaoLabel(p); return bl?(sx?bl+" "+sx:bl):(sx||""); }   // 农历列附属相(缺则按年补)
+  return k==="rel_count"?(state.relCount[p.id]||0):(k==="gen"?(genOf(p.id)??""):(k==="lineage"?familiesOf(p.id).join(" / "):(p[k]==null?"":p[k]))); }
 function renderRoster(){
   const box=$("#rosterBox"); if(!box) return;
   const colset=new Set(rosterCols());

@@ -59,7 +59,7 @@ export async function onRequestPost({ request, env }) {
     // 3) DeepSeek key
     const key = env.DEEPSEEK_API_KEY;
     if (!key) return json({ error: "服务器未配置 DEEPSEEK_API_KEY。请在 Cloudflare Pages → Settings → Environment variables 添加后重新部署。" }, 500);
-    const model = env.DEEPSEEK_MODEL || "deepseek-v4-flash";
+    const model = env.DEEPSEEK_MODEL || "deepseek-chat";   // 旗舰准确版(原 flash 为快但弱);可用 CF 环境变量 DEEPSEEK_MODEL 覆盖
     const base = (env.DEEPSEEK_BASE || "https://api.deepseek.com").replace(/\/+$/, "");
 
     // 4) 调 DeepSeek

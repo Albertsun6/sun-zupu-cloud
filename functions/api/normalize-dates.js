@@ -39,7 +39,7 @@ export async function onRequestPost({ request, env }){
 
     const key = env.DEEPSEEK_API_KEY;
     if(!key) return json({ error:"服务器未配置 DEEPSEEK_API_KEY" }, 500);
-    const model = env.DEEPSEEK_MODEL || "deepseek-v4-flash";
+    const model = env.DEEPSEEK_MODEL || "deepseek-chat";   // 旗舰准确版(原 flash 为快但弱);可用 CF 环境变量 DEEPSEEK_MODEL 覆盖(如 deepseek-reasoner)
     const base = (env.DEEPSEEK_BASE || "https://api.deepseek.com").replace(/\/+$/,"");
 
     // 调 DeepSeek(强制 JSON 输出);校验结构,不合格就把错误反馈给 AI 让它改正,最多 3 轮
