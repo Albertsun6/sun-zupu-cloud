@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.14.0";
+const APP_VERSION = "v0.15.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -579,6 +579,8 @@ async function openDetail(p){
   const rels=await window.REL.of(p.id).catch(()=>[]);
   const catRank=c=>{ const i=["亲属","社交","工作"].indexOf(c); return i<0?9:i; };
   const relPrio=(type,fromMe)=>((type==="father"||type==="mother")&&!fromMe)?1:(type==="spouse"?2:(((type==="father"||type==="mother")&&fromMe)?3:(type==="sibling"?4:5)));
+  const mfRank=note=>{ const n=note||""; if(/原配|元配|嫡|发妻|结发/.test(n))return 0; if(/继|续|填房/.test(n))return 1; if(/侧|妾|偏房|庶/.test(n))return 2; return 3; };  // 名分先后:原配<续娶<侧室<未注
+  const yrNum=s=>{ const m=(s||"").match(/\d{4}/); return m?+m[0]:99999; };
   let rh="";
   if(rels.length){
     const byCat={};
@@ -586,12 +588,21 @@ async function openDetail(p){
       const t=rtMap[r.type]||{label_zh:r.type,category:"其他"};
       const fromMe=r.from_id===p.id, other=fromMe?r.to_id:r.from_id, op=byId(other); if(!op) return;
       const lab=r.directed?(fromMe?(t.forward_label||t.label_zh):(t.inverse_label||t.label_zh)):t.label_zh;
-      (byCat[t.category||"其他"]=byCat[t.category||"其他"]||[]).push({r,op,lab,color:t.color,prio:relPrio(r.type,fromMe)});
+      (byCat[t.category||"其他"]=byCat[t.category||"其他"]||[]).push({r,op,lab,color:t.color,prio:relPrio(r.type,fromMe),isSpouse:r.type==="spouse"});
     });
     Object.keys(byCat).sort((a,b)=>catRank(a)-catRank(b)).forEach(cat=>{
-      byCat[cat].sort((a,b)=>a.prio-b.prio || (gk(genOf(a.op.id))-gk(genOf(b.op.id))) || (a.op.sort_order||0)-(b.op.sort_order||0));
+      byCat[cat].sort((a,b)=>a.prio-b.prio
+        || ((a.isSpouse&&b.isSpouse) ? (yrNum(a.r.start_date)-yrNum(b.r.start_date) || mfRank(a.r.note)-mfRank(b.r.note)) : 0)   // 配偶按婚年→名分排先后
+        || (gk(genOf(a.op.id))-gk(genOf(b.op.id))) || (a.op.sort_order||0)-(b.op.sort_order||0));
+      const spTotal=byCat[cat].filter(x=>x.isSpouse).length; let spIdx=0;                       // 多配偶才显示先后编号
       rh+=`<div class="rel-cat">${esc(cat)}</div>`;
-      byCat[cat].forEach(it=>{ rh+=`<div class="rel-row"><span class="reltag" style="border-color:${esc(it.color||'#cbd5e1')};color:${esc(it.color||'#475569')}">${esc(it.lab)}</span><a class="plink rel-who" data-pid="${esc(it.op.id)}">${esc(it.op.name||'(无名)')}</a><span class="rel-note">${it.r.note?esc(it.r.note):""}</span>${state.canEdit?`<span class="rel-act"><button class="btn btn-sm relnote" data-rid="${it.r.id}" title="改备注">改</button><button class="btn btn-sm reldel" data-rid="${it.r.id}" title="删除">✕</button></span>`:""}</div>`; });
+      byCat[cat].forEach(it=>{
+        let ord="";
+        if(it.isSpouse && spTotal>1){ spIdx++; const o="①②③④⑤⑥⑦⑧⑨"[spIdx-1]||("("+spIdx+")"); ord=`<span style="color:#8e44ad;font-weight:700;margin-right:.15rem" title="配偶先后(按婚年/名分)">${o}</span>`; }
+        const yr=(it.isSpouse&&it.r.start_date)?`<span class="hint" style="margin-left:.3rem">婚 ${esc(it.r.start_date)}</span>`:"";
+        const note=it.r.note?esc(it.r.note):(it.isSpouse&&spTotal>1?'<span class="hint">未注原配/续娶</span>':"");
+        rh+=`<div class="rel-row"><span class="reltag" style="border-color:${esc(it.color||'#cbd5e1')};color:${esc(it.color||'#475569')}">${esc(it.lab)}</span>${ord}<a class="plink rel-who" data-pid="${esc(it.op.id)}">${esc(it.op.name||'(无名)')}</a><span class="rel-note">${note}</span>${yr}${state.canEdit?`<span class="rel-act"><button class="btn btn-sm relnote" data-rid="${it.r.id}"${it.isSpouse?' data-spouse="1"':""} title="${it.isSpouse?'改名分/婚年':'改备注'}">改</button><button class="btn btn-sm reldel" data-rid="${it.r.id}" title="删除">✕</button></span>`:""}</div>`;
+      });
     });
   } else rh=`<div class="hint">(暂无关系,点「+ 加关系」)</div>`;
   // 原始记载/待考 折叠进关系区(尚未转成边的旧文本)
@@ -609,7 +620,12 @@ async function openDetail(p){
   { const eb=$("#relEgoBtn"); if(eb) eb.onclick=()=>{ state.graphCenter=p.id; state.pathA=""; state.pathB=""; closeDetail(); switchView("graph"); }; }
   { const sb=$("#spConvDetail"); if(sb) sb.onclick=()=>{ closeDetail(); openSpouseConverter(p.id); }; }
   box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?(直接删除,不可恢复;人物本身不受影响)"))return; try{ await window.REL.del(+b.dataset.rid); await reloadPersons(); await refreshRelCount(); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
-  box.querySelectorAll(".relnote").forEach(b=>b.onclick=async()=>{ const cur=(rels.find(r=>String(r.id)===b.dataset.rid)||{}).note||""; const nv=prompt("关系备注(如 原配/续娶/侧室):",cur); if(nv===null)return; try{ await window.REL.update(+b.dataset.rid,{note:nv.trim()}); openDetail(byId(p.id)); }catch(e){ alert("失败:"+e.message); } });
+  box.querySelectorAll(".relnote").forEach(b=>b.onclick=async()=>{ const rid=+b.dataset.rid, r=rels.find(x=>String(x.id)===b.dataset.rid)||{};
+    if(b.dataset.spouse==="1"){   // 配偶:同时改名分(原配/续娶/侧室)+婚配年,以记录先后
+      const nv=prompt("名分(原配/续娶/侧室,可空):", r.note||""); if(nv===null)return;
+      const yv=prompt("婚配年(如 1998,用于排先后,可空):", r.start_date||""); if(yv===null)return;
+      try{ await window.REL.update(rid,{note:nv.trim(),start_date:yv.trim()}); openDetail(byId(p.id)); }catch(e){ alert("失败:"+e.message); }
+    } else { const nv=prompt("关系备注:", r.note||""); if(nv===null)return; try{ await window.REL.update(rid,{note:nv.trim()}); openDetail(byId(p.id)); }catch(e){ alert("失败:"+e.message); } } });
   const tgl=$("#relAddToggle");
   if(tgl) tgl.onclick=()=>{ const f=$("#relAddForm"); const show=f.style.display==="none"; f.style.display=show?"":"none";
     if(show){ $("#dq_to").innerHTML=`<option value="">— 选已有人物 —</option><option value="__new__">➕ 新建人物并连上…</option>`+personOptions(); $("#dq_type").innerHTML=relOptionsHtml(); const dn=$("#dqNewWrap"); if(dn)dn.style.display="none"; const t=$("#dq_to"); if(t)t.focus(); } };
