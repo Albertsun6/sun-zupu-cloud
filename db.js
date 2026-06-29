@@ -372,10 +372,28 @@ async function fullData(redact){
   const relationship_types = must(await sb.from("relationship_types").select("*").order("sort_order"));
   return { meta, persons, narratives, verify, transcription, relationships, relationship_types, _redacted:!!redact };
 }
+// 推算世代(复刻 app.js genOf):沿父/母上溯到最近手填gen锚点或顶祖+深度;无父随配偶;带 memo+防环
+function buildGenOf(persons, relationships){
+  const byId={}; (persons||[]).forEach(p=>byId[p.id]=p);
+  const fatherOf={}, motherOf={}, spouseOf={};
+  (relationships||[]).forEach(r=>{
+    if(r.type==="father") fatherOf[r.to_id]=r.from_id;
+    else if(r.type==="mother") motherOf[r.to_id]=r.from_id;
+    else if(r.type==="spouse"){ (spouseOf[r.from_id]=spouseOf[r.from_id]||[]).push(r.to_id); (spouseOf[r.to_id]=spouseOf[r.to_id]||[]).push(r.from_id); }
+  });
+  const memo={};
+  const walk=(id,seen)=>{ if(id in memo) return memo[id]; if(seen.has(id)) return null; seen.add(id);
+    const p=byId[id]; if(!p) return null; const m=parseInt(p.gen,10); if(!isNaN(m)){ memo[id]=m; return m; }
+    const par=fatherOf[id]||motherOf[id]; if(par){ const g=walk(par,seen); memo[id]=(g==null?null:g+1); return memo[id]; }
+    for(const sp of (spouseOf[id]||[])){ const g=walk(sp,seen); if(g!=null){ memo[id]=g; return g; } }
+    memo[id]=null; return null; };
+  return id=>walk(id,new Set());
+}
 async function exportJson(redact){ const d=await fullData(redact); download(redact?"zupu-share.json":"zupu-backup.json", JSON.stringify(d,null,2), "application/json"); }
 async function exportCsv(redact){
-  const d=await fullData(redact); const lines=[CSV_HEAD.concat("婚姻详情").map(csvCell).join(",")];
-  d.persons.filter(p=>!p.deleted).forEach(p=>{ const row=CSV_COLS.map(c=>csvCell(p[c])); row.push(csvCell(marrSummary(p.marriages))); lines.push(row.join(",")); });
+  const d=await fullData(redact); const genOf=buildGenOf(d.persons, d.relationships);
+  const lines=[CSV_HEAD.concat("婚姻详情").map(csvCell).join(",")];
+  d.persons.filter(p=>!p.deleted).forEach(p=>{ const row=CSV_COLS.map(c=>csvCell(c==="gen"?(genOf(p.id)??""):p[c])); row.push(csvCell(marrSummary(p.marriages))); lines.push(row.join(",")); });
   download(redact?"persons-redacted.csv":"persons.csv", "﻿"+lines.join("\n"), "text/csv;charset=utf-8");
 }
 async function exportGedcom(){
@@ -403,7 +421,8 @@ async function exportShareHtml(){
   const living=p=>p.alive==="是";
   const yrs=p=>{ let y=[p.birth,p.death].filter(x=>x&&x!=="无考").join("–"); if(p.birth_lunar||p.death_lunar) y+="(农历 "+[p.birth_lunar,p.death_lunar].filter(Boolean).join("–")+")"; return y; };
   const gk=g=>{ const n=parseInt(g,10); return isNaN(n)?9999:n; };
-  const groups={}; persons.forEach(p=>(groups[p.gen||"—"]=groups[p.gen||"—"]||[]).push(p));
+  const genOf=buildGenOf(d.persons, d.relationships);
+  const groups={}; persons.forEach(p=>{ const g=genOf(p.id); (groups[g==null?"—":g]=groups[g==null?"—":g]||[]).push(p); });
   let gen=""; Object.keys(groups).sort((a,b)=>gk(a)-gk(b)).forEach(g=>{ const cg=groups[g][0].char_gen;
     gen+='<div class="gen"><h3>第 '+esc(g)+' 代'+(cg&&cg!=="—"?" · "+esc(cg)+"字辈":"")+'</h3>';
     groups[g].forEach(p=>{ if(living(p)) gen+='<p><b>'+esc(p.name||"(无名)")+'</b> <span class="tag">在世</span></p>';
