@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.29.1";
+const APP_VERSION = "v0.30.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1278,7 +1278,8 @@ async function renderGraph(){
   catch(e){ box.innerHTML="<p style='padding:1rem;color:#b91c1c'>图谱加载失败:"+esc(e.message)+"</p>"; return; }
   const tmap={}; types.forEach(t=>tmap[t.type]=t);
   const persons=state.persons.filter(p=>!p.deleted); const idset=new Set(persons.map(p=>p.id));
-  const edges=rels.filter(r=>idset.has(r.from_id)&&idset.has(r.to_id));
+  if(!state.graphTypesOff) state.graphTypesOff=new Set();   // 被点掉(隐藏)的关系类型
+  const edges=rels.filter(r=>idset.has(r.from_id)&&idset.has(r.to_id)&&!state.graphTypesOff.has(r.type));   // 按图例勾选筛选:隐藏的类型不参与图/局部圈/关系链
   const adj={}, edgeOf={};
   edges.forEach(r=>{ (adj[r.from_id]=adj[r.from_id]||[]).push(r.to_id); (adj[r.to_id]=adj[r.to_id]||[]).push(r.from_id); edgeOf[r.from_id+"|"+r.to_id]=r; edgeOf[r.to_id+"|"+r.from_id]=r; });
   fillGraphControls();
@@ -1316,7 +1317,15 @@ async function renderGraph(){
   const links=edges.filter(r=>nodeIds.has(r.from_id)&&nodeIds.has(r.to_id)).map(r=>{ const t=tmap[r.type]||{}, onP=!!(pathEdge&&pathEdge.has(r.from_id+"|"+r.to_id));
     return { source:r.from_id, target:r.to_id, value:t.label_zh||r.type,
       lineStyle:{color:onP?"#f59e0b":(t.color||"#94a3b8"),width:onP?4:1.5,curveness:0.06,opacity:pathSet?(onP?1:0.1):0.72}, symbol:r.directed?["none","arrow"]:["none","none"], symbolSize:onP?10:7 }; });
-  const legend=$("#graphLegend"); if(legend) legend.innerHTML=`<span class="leg"><i style="background:#10b981;width:10px;height:10px;border-radius:50%"></i>在世</span><span class="leg"><i style="background:#64748b;width:10px;height:10px;border-radius:50%"></i>已故</span><span class="leg"><i style="background:#f59e0b;width:10px;height:10px;border-radius:50%"></i>未知</span>`+(state.graphCenter?`<span class="leg" style="color:#dc2626">● 中心(${esc((byId(state.graphCenter)||{}).name||"")}/${state.graphHops}跳)</span>`:"")+types.map(t=>`<span class="leg"><i style="background:${esc(t.color)}"></i>${esc(t.label_zh)}</span>`).join("");
+  const legend=$("#graphLegend"); if(legend){
+    legend.innerHTML=`<span class="leg"><i style="background:#10b981;width:10px;height:10px;border-radius:50%"></i>在世</span><span class="leg"><i style="background:#64748b;width:10px;height:10px;border-radius:50%"></i>已故</span><span class="leg"><i style="background:#f59e0b;width:10px;height:10px;border-radius:50%"></i>未知</span>`
+      +(state.graphCenter?`<span class="leg" style="color:#dc2626">● 中心(${esc((byId(state.graphCenter)||{}).name||"")}/${state.graphHops}跳)</span>`:"")
+      +`<span class="hint" style="margin-left:.4rem">关系(点击筛选):</span>`
+      +types.map(t=>{ const off=state.graphTypesOff.has(t.type); return `<span class="leg legtype" data-rt="${esc(t.type)}" title="点击 显示/隐藏「${esc(t.label_zh)}」" style="cursor:pointer;user-select:none;${off?"opacity:.35;text-decoration:line-through":""}"><i style="background:${esc(t.color)}"></i>${esc(t.label_zh)}</span>`; }).join("")
+      +(state.graphTypesOff.size?` <button class="btn btn-sm" id="legAllOn">全部显示</button>`:"");
+    legend.querySelectorAll(".legtype").forEach(s=>s.onclick=()=>{ const rt=s.dataset.rt; if(state.graphTypesOff.has(rt)) state.graphTypesOff.delete(rt); else state.graphTypesOff.add(rt); renderGraph(); });
+    { const a=legend.querySelector("#legAllOn"); if(a) a.onclick=()=>{ state.graphTypesOff.clear(); renderGraph(); }; }
+  }
   box.innerHTML=""; box.style.height="66vh";
   if(_graphChart){ try{_graphChart.dispose();}catch(e){} }
   _graphChart=echarts.init(box);
