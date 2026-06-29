@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.24.0";
+const APP_VERSION = "v0.25.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1372,13 +1372,18 @@ function matchIncoming(inc){
   const yr=(inc.birth||"").match(/\d{4}/), y=yr?yr[0]:null;
   const same=state.persons.filter(p=>!p.deleted && normName(p.name)===key);
   let cands=same, byYear=false;
-  if(y){ cands=same.filter(p=>{ const m=(p.birth||"").match(/\d{4}/); return m&&m[0]===y; }); byYear=true; }
-  const auto = byYear && cands.length===1;   // fail-closed:只有「姓名+生年」唯一命中才自动指向+默认合并;仅按姓名/多命中/无生年→默认新建,逼用户在下拉认领,防一键覆盖错人
-  return { inc, nm, y, byYear, options:same, target:(auto?cands[0].id:"__new__"), strategy:(auto?"merge":"new") };
+  if(y){ const yc=same.filter(p=>{ const m=(p.birth||"").match(/\d{4}/); return m&&m[0]===y; }); if(yc.length){ cands=yc; byYear=true; } }   // 生年命中才用它过滤;不命中退回全部同名(不丢匹配)
+  // 用户偏好(2026-06-29 重新导入补全):有同名现有就【默认指向它】(优先生年命中,否则第一个同名)、处理【默认覆盖】;无同名才新建。
+  // 安全:覆盖只写"导入有值"的字段、绝不用空值抹掉已有(runImport line ~1428 保证);仅按姓名/多同名会显著标黄提示;逐条可改、整批可撤销。
+  const hasMatch = same.length>=1, tgt = hasMatch?cands[0]:null;
+  const tYr = tgt ? (((tgt.birth||"").match(/\d{4}/)||[])[0]||null) : null;
+  const yearConflict = !!(hasMatch && !byYear && y && tYr && tYr!==y);   // 导入有生年、命中对象也有生年但不同→疑似不同人,标红
+  return { inc, nm, y, byYear, yearConflict, options:same, target:(hasMatch?cands[0].id:"__new__"), strategy:(hasMatch?"overwrite":"new") };
 }
 // 异步:出生日期 规则优先,复杂的(农历/年号/带时辰)交 AI → 拆出 公历birth / 农历birth_lunar / 时辰birth_time,再匹配
 async function buildPreviewFromIncoming(incList){
   const list=incList.filter(inc=>(inc.name||"").trim());
+  _imp.skippedNoName = incList.length - list.length;   // 无姓名行被静默过滤,在预览标题里如实告知
   const aiNeed=new Set();
   list.forEach(inc=>{ const b=(inc.birth||"").trim(); if(!b) return; inc._braw=b; if(needsAIDate(b)) aiNeed.add(b); });   // 全部走 resolveDate;只有缺年(年号)等才调 AI
   const mp={}; if(aiNeed.size){ try{ (await aiNormalizeDates([...aiNeed])).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
@@ -1401,16 +1406,20 @@ function renderImportPreview(){
     const sum=[x.inc.name,x.inc.sex,x.inc.birth,x.inc.birth_time&&("🕐"+x.inc.birth_time),x.inc.birth_lunar&&("农历:"+x.inc.birth_lunar),x.inc.company].filter(Boolean).join(" · ");
     const opts=`<option value="__new__"${x.target==="__new__"?" selected":""}>➕ 新建</option>`+(x.options||[]).map(p=>`<option value="${esc(p.id)}"${x.target===p.id?" selected":""}>${esc(p.name)}·${esc(p.birth||"无生年")}·${esc(p.id)}</option>`).join("");
     const strat = x.target==="__new__" ? `<span class="hint">新建</span>` : `<select class="imp-strat" data-i="${i}"><option value="merge"${x.strategy==="merge"?" selected":""}>合并·填空</option><option value="overwrite"${x.strategy==="overwrite"?" selected":""}>覆盖</option><option value="skip"${x.strategy==="skip"?" selected":""}>跳过</option></select>`;
-    const warn=(!x.byYear&&(x.options||[]).length)?' <span class="hint" style="color:#b45309">无生年·仅按姓名,请核对</span>':((x.options||[]).length>1?' <span class="hint" style="color:#b45309">多个同名</span>':'');
+    const warn = x.target==="__new__" ? ''
+      : ((x.options||[]).length>1 ? ` <span class="hint" style="color:#b45309;font-weight:600">⚠ 多个同名(${(x.options||[]).length}),已默认第一个,务必核对</span>`
+        : (x.yearConflict ? ` <span class="hint" style="color:#dc2626;font-weight:600">⚠ 生年不一致(现有 ${esc(((byId(x.target)||{}).birth)||"?")}),可能非同一人,请核对</span>`
+          : (!x.byYear ? ' <span class="hint" style="color:#b45309">按姓名匹配(现有缺生年),可填补</span>'
+            : ' <span class="hint" style="color:#15803d">✓ 姓名+生年命中</span>')));
     return `<tr><td>${esc(sum)}${warn}</td><td><select class="imp-match" data-i="${i}">${opts}</select></td><td>${strat}</td></tr>`;
   }).join("");
-  mask.innerHTML=`<div class="modal" style="width:min(840px,100%)"><h2>匹配预览(${P.length} 行 · 新建 ${newCount})</h2>
+  mask.innerHTML=`<div class="modal" style="width:min(840px,100%)"><h2>匹配预览(${P.length} 行 · 新建 ${newCount}${_imp.skippedNoName?(" · 空名跳过 "+_imp.skippedNoName):""})</h2>
     <p class="hint">左=导入数据,中=匹配到谁(可改/选新建),右=命中现有时怎么处理。<b>合并·填空</b>只补空字段(不动已有);<b>覆盖</b>用导入值覆盖;<b>跳过</b>不动。</p>
     <div style="margin:.3rem 0">命中现有的全部设为: <button class="btn btn-sm" data-all="merge">合并</button> <button class="btn btn-sm" data-all="overwrite">覆盖</button> <button class="btn btn-sm" data-all="skip">跳过</button></div>
     <div style="max-height:50vh;overflow:auto"><table class="roster"><thead><tr><th>导入数据</th><th>匹配到</th><th>处理</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="err" id="impErr"></div>
     <div class="modal-foot"><button class="btn" id="impBack">上一步</button><span class="spacer"></span><button class="btn btn-primary" id="impRun">确认导入</button></div></div>`;
-  mask.querySelectorAll(".imp-match").forEach(s=>s.onchange=()=>{ const i=+s.dataset.i; _imp.preview[i].target=s.value; _imp.preview[i].strategy=(s.value==="__new__")?"new":(_imp.preview[i].strategy==="new"?"merge":_imp.preview[i].strategy); renderImporter(); });
+  mask.querySelectorAll(".imp-match").forEach(s=>s.onchange=()=>{ const i=+s.dataset.i; _imp.preview[i].target=s.value; _imp.preview[i].strategy=(s.value==="__new__")?"new":(_imp.preview[i].strategy==="new"?"overwrite":_imp.preview[i].strategy); renderImporter(); });   // 选中现有→默认覆盖(与默认一致)
   mask.querySelectorAll(".imp-strat").forEach(s=>s.onchange=()=>{ _imp.preview[+s.dataset.i].strategy=s.value; });
   mask.querySelectorAll("[data-all]").forEach(b=>b.onclick=()=>{ _imp.preview.forEach(x=>{ if(x.target!=="__new__") x.strategy=b.dataset.all; }); renderImporter(); });
   $("#impBack").onclick=()=>{ _imp.step=2; renderImporter(); };
@@ -1424,6 +1433,7 @@ async function runImport(){
     try{
       if(x.target==="__new__"){ if(!x.nm) continue; await api("POST","/api/persons",{ ...clean(x.inc), status:(x.inc.status||"待考") }); created++; }
       else { const ex=byId(x.target); if(!ex){ fails.push(x.nm+":匹配对象不存在"); continue; }
+        if(ex.deleted){ fails.push(x.nm+":目标已在回收站,已跳过"); continue; }   // 防 stale 缓存/并发把回收站里的人改了
         if(x.strategy==="skip"){ skipped++; continue; }
         const patch={}; Object.keys(x.inc).forEach(k=>{ const v=(x.inc[k]||"").trim(); if(!v) return;
           if(x.strategy==="merge"){ if(!((ex[k]||"").trim())) patch[k]=v; } else patch[k]=v; });
