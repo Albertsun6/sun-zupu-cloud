@@ -44,6 +44,7 @@ mask.innerHTML = `
     <label class="switch" id="calLeapWrap" style="display:none;margin-top:.4rem"><input type="checkbox" id="calLeap"> 闰月</label>
     <div class="hint" id="calPrev" style="margin-top:.7rem;font-size:.85rem"></div>
     <div class="modal-foot">
+      <button class="btn" id="calClear" type="button">不详(清空)</button>
       <span class="spacer"></span>
       <button class="btn" id="calCancel" type="button">取消</button>
       <button class="btn btn-primary" id="calOk" type="button">填入</button>
@@ -54,7 +55,10 @@ document.body.appendChild(mask);
 const q = id => mask.querySelector("#" + id);
 const calY = q("calY"), calM = q("calM"), calD = q("calD"), calLeap = q("calLeap"),
       calLeapWrap = q("calLeapWrap"), calPrev = q("calPrev"), calTitle = q("calTitle"), calOk = q("calOk");
+calM.add(new Option("— 月(可不选)", ""));
 for (let m = 1; m <= 12; m++) calM.add(new Option(m + " 月", m));
+const _SX12 = ["鼠","牛","虎","兔","龙","蛇","马","羊","猴","鸡","狗","猪"];
+const sxOf = y => y ? _SX12[(((y - 4) % 12) + 12) % 12] : "";   // 只年时按公历年近似属相
 
 const mode = () => mask.querySelector("input[name=calMode]:checked").value;
 const leapMonthOf = y => { try { return LunarYear.fromYear(y).getLeapMonth(); } catch { return 0; } };
@@ -68,25 +72,25 @@ function rebuildLeap() {
   if (!show) calLeap.checked = false;
 }
 function rebuildDays() {
-  const y = parseInt(calY.value), m = parseInt(calM.value);
-  let n = 30;
-  if (y && m) n = mode() === "solar" ? solarDays(y, m) : (lunarDays(y, m, calLeap.checked) || 30);
-  const cur = parseInt(calD.value) || 1;
+  const y = parseInt(calY.value), m = parseInt(calM.value), cur = parseInt(calD.value) || 0;
   calD.innerHTML = "";
-  for (let d = 1; d <= n; d++) calD.add(new Option(d + " 日", d));
-  calD.value = Math.min(cur, n);
+  calD.add(new Option("— 日(可不选)", ""));
+  if (y && m) { const n = mode() === "solar" ? solarDays(y, m) : (lunarDays(y, m, calLeap.checked) || 30);
+    for (let d = 1; d <= n; d++) calD.add(new Option(d + " 日", d)); if (cur && cur <= n) calD.value = cur; }
 }
 function compute() {
-  const y = parseInt(calY.value), m = parseInt(calM.value), d = parseInt(calD.value);
-  if (!y || !m || !d) return { err: "请填写 年 / 月 / 日" };
+  const y = parseInt(calY.value); if (!y) return { err: "请填年份(月、日可不选)" };
+  const m = parseInt(calM.value) || 0, d = parseInt(calD.value) || 0;
   try {
+    if (!m) return { solar: String(y), lunar: `属${sxOf(y)}`, partial: true };                 // 只年
     if (mode() === "solar") {
-      if (d > solarDays(y, m)) return { err: `公历 ${y}年${m}月 没有 ${d} 日` };
+      if (d && d > solarDays(y, m)) return { err: `公历 ${y}年${m}月 没有 ${d} 日` };
+      if (!d) return { solar: `${y}-${pad(m)}`, lunar: `属${sxOf(y)}`, partial: true };          // 年月
       const lu = Solar.fromYmd(y, m, d).getLunar();
       return { solar: `${y}-${pad(m)}-${pad(d)}`, lunar: `农历${lu.getMonthInChinese()}月${lu.getDayInChinese()} 属${lu.getYearShengXiao()}`, gz: lu.getYearInGanZhi() };
     }
-    const leap = calLeap.checked && leapMonthOf(y) === m;
-    const dc = lunarDays(y, m, leap);
+    if (!d) return { solar: String(y), lunar: `属${sxOf(y)}`, partial: true };                   // 农历缺日→只能给年
+    const leap = calLeap.checked && leapMonthOf(y) === m, dc = lunarDays(y, m, leap);
     if (!dc) return { err: "该年没有这个(闰)月" };
     if (d > dc) return { err: `农历${leap ? "闰" : ""}${m}月 只有 ${dc} 天` };
     const lo = Lunar.fromYmd(y, leap ? -m : m, d), so = lo.getSolar();
@@ -96,6 +100,7 @@ function compute() {
 function updatePreview() {
   const r = compute();
   if (r.err) { calPrev.textContent = "⚠ " + r.err; calPrev.style.color = "#b45309"; calOk.disabled = true; }
+  else if (r.partial) { calPrev.innerHTML = `公历 <b>${r.solar}</b>(残缺,月/日可不选) · <b>${r.lunar}</b>`; calPrev.style.color = "#475569"; calOk.disabled = false; }
   else { calPrev.innerHTML = `公历 <b>${r.solar}</b> &nbsp;·&nbsp; ${r.gz}年 <b>${r.lunar}</b>`; calPrev.style.color = "#475569"; calOk.disabled = false; }
 }
 function refresh() { rebuildLeap(); rebuildDays(); updatePreview(); }
@@ -105,12 +110,12 @@ function open(ev) {
   targetEv = ev in FIELDS ? ev : "birth";
   calTitle.textContent = "万年历 · 选择" + (targetEv === "death" ? "卒日" : "生日");
   const cur = (document.getElementById(FIELDS[targetEv][0]).value || "").trim();
-  const full = cur.match(/^(\d{3,4})-(\d{1,2})-(\d{1,2})$/);
   mask.querySelector("input[name=calMode][value=solar]").checked = true;
-  if (full) { calY.value = +full[1]; calM.value = +full[2]; }
-  else { const ym = cur.match(/(\d{3,4})/); calY.value = ym ? +ym[1] : ""; calM.value = 1; }
+  const m3 = cur.match(/^(\d{3,4})-(\d{1,2})-(\d{1,2})$/), m2 = cur.match(/^(\d{3,4})-(\d{1,2})$/), m1 = cur.match(/(\d{3,4})/);
+  calY.value = m3 ? +m3[1] : (m2 ? +m2[1] : (m1 ? +m1[1] : ""));
+  calM.value = m3 ? +m3[2] : (m2 ? +m2[2] : "");
   refresh();
-  if (full) { calD.value = +full[3]; updatePreview(); }
+  if (m3) { calD.value = +m3[3]; updatePreview(); }
   mask.classList.add("open");
 }
 function close() { mask.classList.remove("open"); }
@@ -121,6 +126,7 @@ mask.addEventListener("change", e => {
   else if (e.target.id === "calD") updatePreview();
 });
 q("calCancel").addEventListener("click", close);
+q("calClear").addEventListener("click", () => { const [sf, lf] = FIELDS[targetEv]; document.getElementById(sf).value = ""; const lel = document.getElementById(lf); if (lel) lel.value = ""; close(); });   // 不详:清空公历+农历
 mask.addEventListener("click", e => { if (e.target === mask) close(); });
 calOk.addEventListener("click", () => {
   const r = compute(); if (r.err) return;
@@ -176,7 +182,7 @@ tmask.innerHTML = `
     </div>
     <div class="field" id="tmShi" style="display:none"><label>时辰</label><select id="tmSc"></select></div>
     <div class="hint" id="tmPrev" style="margin-top:.6rem;font-size:.85rem"></div>
-    <div class="modal-foot"><span class="spacer"></span>
+    <div class="modal-foot"><button class="btn" id="tmClear" type="button">不选(清空)</button><span class="spacer"></span>
       <button class="btn" id="tmCancel" type="button">取消</button>
       <button class="btn btn-primary" id="tmOk" type="button">填入</button></div>
   </div>`;
@@ -218,6 +224,7 @@ tmask.addEventListener("change", e => {
   if (e.target.name === "tmMode" || ["tmH", "tmMin", "tmSc"].includes(e.target.id)) tmRefresh();
 });
 tq("tmCancel").addEventListener("click", tmClose);
+tq("tmClear").addEventListener("click", () => { const el = document.getElementById("f_birth_time"); if (el) el.value = ""; const h = document.getElementById("f_birth_time_sc"); if (h) h.textContent = ""; tmClose(); });
 tmask.addEventListener("click", e => { if (e.target === tmask) tmClose(); });
 tq("tmOk").addEventListener("click", () => {
   const el = document.getElementById("f_birth_time");

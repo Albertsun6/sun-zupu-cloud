@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.22.3";
+const APP_VERSION = "v0.23.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1013,6 +1013,19 @@ async function onBirthBlur(){
 }
 // 批量规范:扫全部 birth → 规则 + AI兜底 → 预览(原→新,不识别标红)→ 勾选确认才改(可撤销)
 const _messyDate = s => !(s||"").trim() || /\d{4}|时|分/.test(s);   // 空 或 含年/时=未拆的原始串,可被万年历清洗版覆盖
+// 出生串里"被识别为日期/时间/属相"之外的残余文字(用于判断是否不符合规则);留 约/无考/前后 等当残余信号
+function dateLeftover(raw){
+  return String(raw||"")
+    .replace(/光绪|宣统|同治|咸丰|道光|嘉庆|乾隆|雍正|康熙|顺治|崇祯|天启|万历|嘉靖|民国|生于?|殁于?|卒于?|葬于?|享年|于/g,"")
+    .replace(/\d/g,"").replace(/[年月日号时点分秒]/g,"")
+    .replace(/农历|阴历|公历|阳历|闰/g,"")
+    .replace(/[零〇一二两三四五六七八九十廿卄卅]/g,"")
+    .replace(/[正冬腊端荷巧桂菊阳寒]/g,"").replace(/初/g,"")
+    .replace(/[子丑寅卯辰巳午未申酉戌亥]/g,"").replace(/[甲乙丙丁戊己庚辛壬癸]/g,"")
+    .replace(/属?[鼠牛虎兔龙蛇马羊猴鸡狗猪]/g,"")
+    .replace(/凌晨|清晨|早晨|早上|上午|中午|晌午|下午|傍晚|黄昏|晚上|夜里|夜间|半夜|子夜|早|晚|晌|夜|半|刻/g,"")
+    .replace(/[\s\-\/.:：·,，。、;；()（）]/g,"").trim();
+}
 async function openDateNormalizer(){
   let mask=$("#dateNormMask"); if(!mask){ mask=el("div","mask"); mask.id="dateNormMask"; document.body.appendChild(mask); }
   // 只处理"非干净ISO"的记录(避免给全部已规范的公历批量加农历);对它们用万年历拆 公历/农历/时辰,缺年的年号才调 AI
@@ -1022,17 +1035,24 @@ async function openDateNormalizer(){
   mask.classList.add("open");
   const mp={}; if(aiNeed.length){ try{ (await aiNormalizeDates(aiNeed)).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
   todo.forEach(x=>{ const rd=resolveDate(mp[x.raw], x.raw); const patch={}, desc=[];
-    if(rd.birth && rd.birth!==x.raw){ patch.birth=rd.birth; } if(rd.birth) desc.push("公历 "+rd.birth);
+    if(rd.birth){ if(rd.birth!==x.raw) patch.birth=rd.birth; desc.push("公历 "+rd.birth); }
+    else { patch.birth=""; desc.push("公历清空(无法解析)"); }                       // 解析不出→清掉乱串
     if(rd.birth_lunar && _messyDate(x.p.birth_lunar)){ patch.birth_lunar=rd.birth_lunar; desc.push("农历 "+rd.birth_lunar); }
     if(rd.birth_time  && _messyDate(x.p.birth_time)){  patch.birth_time =rd.birth_time;  desc.push("🕐"+rd.birth_time); }
-    if(Object.keys(patch).length) rows.push({p:x.p,raw:x.raw,patch,desc:desc.join(" · "),src:needsAIDate(x.raw)?"AI+万年历":"万年历",ok:true});
-    else if(!rd.birth) rows.push({p:x.p,raw:x.raw,ok:false}); });
+    // 不符合规则的残余(无考/约X/夹带描述)→ 原文并进备注 + 状态存疑(幂等)
+    if(!rd.birth || dateLeftover(x.raw).length>0 || /约|大约|前后|左右|许|无考|不详|未详|失考|待考|存疑/.test(x.raw)){
+      const note0=(x.p.note||"").trim();
+      if(!note0.includes("原日期记载")) patch.note=(note0?note0+" · ":"")+"原日期记载:"+x.raw;
+      if((x.p.status||"")!=="存疑") patch.status="存疑";
+      desc.push("→备注+存疑");
+    }
+    if(Object.keys(patch).length) rows.push({p:x.p,raw:x.raw,patch,desc:desc.join(" · "),src:needsAIDate(x.raw)?"AI+万年历":"万年历",ok:true}); });
   const good=rows.filter(r=>r.ok), bad=rows.filter(r=>!r.ok);
   const list=good.map((r,i)=>`<label class="mergerow"><input type="checkbox" class="dn" data-i="${i}" checked> <b>${esc(r.p.name||r.p.id)}</b> <span class="hint">「${esc(r.raw)}」→</span> <b style="color:#047857">${esc(r.desc)}</b> <span class="hint">(${esc(r.src)})</span></label>`).join("");
   const badList=bad.map(r=>`<div class="hint" style="color:#b45309;padding:.2rem 0">⚠ <b>${esc(r.p.name||r.p.id)}</b>:「${esc(r.raw)}」无法识别,请手动编辑</div>`).join("");
   mask.innerHTML=`<div class="modal" style="width:min(700px,100%)">
     <h2>规范出生日期 <span class="pill pill-info">${good.length}</span></h2>
-    <p class="hint">拆成 公历出生日期 / 农历生辰 / 出生时辰(农历↔公历用万年历精确换算)。逐条核对,取消勾选不对的,确认后改(可撤销)。${bad.length?(" 有 "+bad.length+" 条无法识别,已标红、需手动。"):""}</p>
+    <p class="hint">拆成 公历日期 / 农历生辰(含属相) / 时辰(用万年历换算);<b>解析不出/约X/无考 等不规则的</b>:原文并进备注、状态标存疑。逐条核对,取消勾选不对的,确认后改(可撤销)。</p>
     <div style="max-height:52vh;overflow:auto">${list||'<div class="hint">没有需要规范的(都已是标准格式)。</div>'}${badList}</div>
     <div class="modal-foot">${good.length?`<label class="hint"><input type="checkbox" id="dnAll" checked> 全选</label>`:""}<span class="spacer"></span><button class="btn" id="dnCancel">关闭</button>${good.length?`<button class="btn btn-primary" id="dnOk">应用所选</button>`:""}</div>
   </div>`;
