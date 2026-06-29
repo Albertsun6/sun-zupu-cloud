@@ -19,9 +19,9 @@ window.LUNARCONV = {
   get ready(){ return !!Solar; },
   shichenOf: _shichenOf,
   lunarToSolar(y, m, d, leap){ try { const lo = Lunar.fromYmd(y, leap ? -m : m, d), so = lo.getSolar();
-    return { solar: `${so.getYear()}-${pad(so.getMonth())}-${pad(so.getDay())}`, lunar: `农历${lo.getMonthInChinese()}月${lo.getDayInChinese()}`, gz: lo.getYearInGanZhi() }; } catch (e) { return null; } },
+    return { solar: `${so.getYear()}-${pad(so.getMonth())}-${pad(so.getDay())}`, lunar: `农历${lo.getMonthInChinese()}月${lo.getDayInChinese()} 属${lo.getYearShengXiao()}`, gz: lo.getYearInGanZhi(), shengxiao: lo.getYearShengXiao() }; } catch (e) { return null; } },
   solarToLunar(y, m, d){ try { const lu = Solar.fromYmd(y, m, d).getLunar();
-    return { solar: `${y}-${pad(m)}-${pad(d)}`, lunar: `农历${lu.getMonthInChinese()}月${lu.getDayInChinese()}`, gz: lu.getYearInGanZhi() }; } catch (e) { return null; } }
+    return { solar: `${y}-${pad(m)}-${pad(d)}`, lunar: `农历${lu.getMonthInChinese()}月${lu.getDayInChinese()} 属${lu.getYearShengXiao()}`, gz: lu.getYearInGanZhi(), shengxiao: lu.getYearShengXiao() }; } catch (e) { return null; } }
 };
 
 const mask = document.createElement("div");
@@ -83,14 +83,14 @@ function compute() {
     if (mode() === "solar") {
       if (d > solarDays(y, m)) return { err: `公历 ${y}年${m}月 没有 ${d} 日` };
       const lu = Solar.fromYmd(y, m, d).getLunar();
-      return { solar: `${y}-${pad(m)}-${pad(d)}`, lunar: `农历${lu.getMonthInChinese()}月${lu.getDayInChinese()}`, gz: lu.getYearInGanZhi() };
+      return { solar: `${y}-${pad(m)}-${pad(d)}`, lunar: `农历${lu.getMonthInChinese()}月${lu.getDayInChinese()} 属${lu.getYearShengXiao()}`, gz: lu.getYearInGanZhi() };
     }
     const leap = calLeap.checked && leapMonthOf(y) === m;
     const dc = lunarDays(y, m, leap);
     if (!dc) return { err: "该年没有这个(闰)月" };
     if (d > dc) return { err: `农历${leap ? "闰" : ""}${m}月 只有 ${dc} 天` };
     const lo = Lunar.fromYmd(y, leap ? -m : m, d), so = lo.getSolar();
-    return { solar: `${so.getYear()}-${pad(so.getMonth())}-${pad(so.getDay())}`, lunar: `农历${lo.getMonthInChinese()}月${lo.getDayInChinese()}`, gz: lo.getYearInGanZhi() };
+    return { solar: `${so.getYear()}-${pad(so.getMonth())}-${pad(so.getDay())}`, lunar: `农历${lo.getMonthInChinese()}月${lo.getDayInChinese()} 属${lo.getYearShengXiao()}`, gz: lo.getYearInGanZhi() };
   } catch { return { err: "无法换算(年份可能超出范围)" }; }
 }
 function updatePreview() {

@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.22.0";
+const APP_VERSION = "v0.22.1";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -130,9 +130,7 @@ function renderAuthBar(){       // 显示当前登录者 + 角色;viewer 隐藏�
   document.body.classList.toggle("viewer", !state.canEdit);
 }
 function renderHeader(){
-  const m=state.meta||{};
-  // 品牌名固定=关系图谱;副标题=当前这本谱/库(meta.title)+ 地望,不让数据顶掉品牌名
-  $("#subtitle").textContent=(m.title?("· "+m.title):"")+(m.lineage?("  "+m.lineage):"");
+  $("#subtitle").textContent="";   // 谱名/地望副标题已按需去掉(产品是通用关系图谱)
   const total=state.persons.length, alive=state.persons.filter(p=>p.alive==="是").length;
   const todo=state.verify.filter(v=>!/已?确认/.test(v.status||"")).length;
   $("#stats").textContent=`共 ${total} 人 · 在世 ${alive} · 待核实 ${todo} 项`;
@@ -931,6 +929,8 @@ async function aiNormalizeDates(list){
 }
 const _SHICHEN12=["子","丑","寅","卯","辰","巳","午","未","申","酉","戌","亥"];
 const _shichenOf = h => (window.LUNARCONV&&window.LUNARCONV.shichenOf)?window.LUNARCONV.shichenOf(h):(_SHICHEN12[Math.floor(((h+1)%24)/2)]+"时");
+const _SHENGXIAO=["鼠","牛","虎","兔","龙","蛇","马","羊","猴","鸡","狗","猪"];
+const _shengXiao = y => y?_SHENGXIAO[(((y-4)%12)+12)%12]:"";   // 按公历年近似生肖(精确随立春的由 LUNARCONV 给)
 // 从任意中文/数字串抽出生时间 → "H:MM 时辰" 或 "X时";抽不到返回 ""。纯客户端规则(阿拉伯+中文数字+时辰名+早晚上下午/半夜判时段),不依赖 AI 格式。
 const _CNNUM={零:0,"〇":0,一:1,二:2,两:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};
 function _cnNum(s){ s=String(s||"").trim(); if(!s)return null; if(/^\d+$/.test(s))return +s;
@@ -998,11 +998,12 @@ function resolveDate(r, raw){
   const d = cp.day   || (Number.isInteger(r.day)?r.day:null);
   const leap = cp.leap || r.leap===true;
   if(!y) return out;
+  const sx=_shengXiao(y);   // 属相(加进农历字段)
   if(is_lunar){
-    if(m&&d&&LC&&LC.ready){ const c=LC.lunarToSolar(y,m,d,!!leap); if(c){ out.birth=c.solar; out.birth_lunar=c.lunar; return out; } }
-    out.birth=String(y); out.birth_lunar=(m&&d)?`农历${m}月${d}日`:"";   // 转换失败/缺月日:只能给年
-  } else if(m&&d){ out.birth=`${y}-${p2(m)}-${p2(d)}`; if(LC&&LC.ready){ const c=LC.solarToLunar(y,m,d); if(c) out.birth_lunar=c.lunar; } }
-  else if(m){ out.birth=`${y}-${p2(m)}`; } else out.birth=String(y);
+    if(m&&d&&LC&&LC.ready){ const c=LC.lunarToSolar(y,m,d,!!leap); if(c){ out.birth=c.solar; out.birth_lunar=c.lunar; return out; } }   // c.lunar 已含属相
+    out.birth=String(y); out.birth_lunar=(m&&d)?`农历${m}月${d}日 属${sx}`:`属${sx}`;   // 转换失败/缺月日:至少给年+属相
+  } else if(m&&d){ out.birth=`${y}-${p2(m)}-${p2(d)}`; let lu=""; if(LC&&LC.ready){ const c=LC.solarToLunar(y,m,d); if(c) lu=c.lunar; } out.birth_lunar=lu||`属${sx}`; }
+  else if(m){ out.birth=`${y}-${p2(m)}`; out.birth_lunar=`属${sx}`; } else { out.birth=String(y); out.birth_lunar=`属${sx}`; }
   return out;
 }
 // 表单失焦:统一走万年历拆 公历/农历/时辰(客户端优先,缺年的年号才调 AI),空的农历/时辰自动补
@@ -1154,6 +1155,7 @@ function bfsPath(adj,a,b){
   return null;
 }
 function fillGraphControls(){
+  const gs=$("#gc_search"); if(gs) gs.value="";
   const opts=`<option value="">—</option>`+personOptions();
   [["gc_center",state.graphCenter],["gc_pathA",state.pathA],["gc_pathB",state.pathB]].forEach(([id,val])=>{ const s=$("#"+id); if(s){ s.innerHTML=opts; s.value=val||""; } });
   const hs=$("#gc_hops"); if(hs) hs.value=String(state.graphHops||2);
@@ -1658,6 +1660,7 @@ $("#delBtn").onclick=delModal;
 $("#cancelBtn").onclick=closeModal;
 $("#reTree").onclick=renderTree;
 $("#gc_center")&&($("#gc_center").onchange=e=>{ state.graphCenter=e.target.value; renderGraph(); });
+$("#gc_search")&&($("#gc_search").oninput=e=>{ const s=$("#gc_center"); if(s){ const cur=s.value; s.innerHTML=`<option value="">—</option>`+personOptions(cur, e.target.value); s.value=cur; } });   // 中心选择器可搜索(人多)
 $("#gc_hops")&&($("#gc_hops").onchange=e=>{ state.graphHops=+e.target.value||2; renderGraph(); });
 $("#gc_pathA")&&($("#gc_pathA").onchange=e=>{ state.pathA=e.target.value; renderGraph(); });
 $("#gc_pathB")&&($("#gc_pathB").onchange=e=>{ state.pathB=e.target.value; renderGraph(); });
