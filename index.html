@@ -214,8 +214,13 @@
 <div class="mask" id="aiMask">
   <div class="modal" style="width:min(900px,100%)">
     <h2>🤖 AI 批量添加</h2>
-    <p class="hint">粘贴一段中文(族谱片段 / 名单 / 讣告 / 简历 / 回忆…),AI 识别成人物草稿,你核对补齐后再创建。识别用 DeepSeek;创建出来的人物状态都是「待考」,可再逐个编辑/连关系。</p>
-    <textarea id="aiText" rows="6" placeholder="在此粘贴文字…例:孙德范,孙鸿德之孙,1948年生于榆树,务农;长子孙宝山,1972年生。"></textarea>
+    <p class="hint">粘贴文字 <b>或选文件</b>(族谱片段 / 名单 / 讣告 / 简历 / 回忆…),AI 识别成人物草稿,你核对补齐后再创建。识别用 DeepSeek;创建出来的人物状态都是「待考」,可再逐个编辑/连关系。</p>
+    <div class="modal-foot" style="margin:.2rem 0">
+      <button class="btn btn-sm" id="aiFileBtn">📁 选择文件导入</button>
+      <input type="file" id="aiFile" accept=".txt,.csv,.tsv,.md,.json,text/*" style="display:none"/>
+      <span class="hint">支持 txt / csv / tsv / md(读入文本框后点「识别」;表格也可)</span>
+    </div>
+    <textarea id="aiText" rows="6" placeholder="在此粘贴文字,或上方「选择文件导入」…例:孙德范,孙鸿德之孙,1948年生于榆树,务农;长子孙宝山,1972年生。"></textarea>
     <div class="modal-foot">
       <button class="btn btn-primary" id="aiParse">识别</button>
       <span class="hint" id="aiMsg"></span>
@@ -252,9 +257,9 @@
 </div>
 
 <!-- ?v= 随版本递增,确保部署后浏览器加载最新代码(改版本时同步改这里) -->
-<script src="config.js?v=0.12.4"></script>
-<script type="module" src="db.js?v=0.12.4"></script>
-<script type="module" src="app.js?v=0.12.4"></script>
-<script type="module" src="calendar.js?v=0.12.4"></script>
+<script src="config.js?v=0.12.5"></script>
+<script type="module" src="db.js?v=0.12.5"></script>
+<script type="module" src="app.js?v=0.12.5"></script>
+<script type="module" src="calendar.js?v=0.12.5"></script>
 </body>
 </html>

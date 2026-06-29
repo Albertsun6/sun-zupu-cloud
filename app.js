@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.12.4";
+const APP_VERSION = "v0.12.5";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -848,9 +848,10 @@ async function renderGraph(){
   _graphChart=echarts.init(box);
   _graphChart.setOption({
     tooltip:{ formatter:pp=> pp.dataType==="edge" ? esc(pp.data.value) : "<b>"+esc(pp.data.name)+"</b><br>"+esc(pp.data.value) },
-    series:[{ type:"graph", layout:"force", roam:true, draggable:true, force:{repulsion:230,edgeLength:95,gravity:0.08},
+    series:[{ type:"graph", layout:"force", roam:true, draggable:true, force:{repulsion:260,edgeLength:110,gravity:0.08},
       label:{show:true,position:"right",fontSize:11,fontFamily:'"PingFang SC","Noto Sans SC",sans-serif',color:"#0f172a"},
-      emphasis:{focus:"adjacency",lineStyle:{width:4}}, lineStyle:{color:"#94a3b8"}, data:nodes, links:links }]
+      edgeLabel:{show:true, formatter:pp=>pp.data.value, fontSize:10, color:"#64748b", backgroundColor:"rgba(255,255,255,.7)", padding:[1,2], borderRadius:3},  // 连线上显示关系称谓
+      emphasis:{focus:"adjacency",lineStyle:{width:4},edgeLabel:{fontSize:12,color:"#0f172a"}}, lineStyle:{color:"#94a3b8"}, data:nodes, links:links }]
   });
   _graphChart.on("click", pp=>{ if(pp.dataType==="node"){ const t=byId(pp.data.id); if(t) openDetail(t); } });
 }
@@ -1161,6 +1162,11 @@ $("#exJson")      && ($("#exJson").onclick=()=>window.EXPORT.json(state.share));
 $("#aiBtn")       && ($("#aiBtn").onclick=openAI);
 $("#aiParse")     && ($("#aiParse").onclick=aiParse);
 $("#aiCreateAll") && ($("#aiCreateAll").onclick=aiCreateAll);
+$("#aiFileBtn")   && ($("#aiFileBtn").onclick=()=>$("#aiFile").click());
+$("#aiFile")      && ($("#aiFile").onchange=async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f) return;
+  if(f.size>3*1024*1024){ $("#aiMsg").textContent="文件过大(>3MB),请拆分或转文本"; return; }
+  try{ const txt=await f.text(); $("#aiText").value=txt; $("#aiMsg").textContent="已读入「"+f.name+"」("+txt.length+" 字),点「识别」"; }
+  catch(err){ $("#aiMsg").textContent="读取失败(请用 txt/csv 等文本文件):"+err.message; } });
 $("#aiClose")     && ($("#aiClose").onclick=()=>$("#aiMask").classList.remove("open"));
 $("#aiMask")      && ($("#aiMask").onclick=e=>{ if(e.target===$("#aiMask")) $("#aiMask").classList.remove("open"); });
 $("#spClose")     && ($("#spClose").onclick=()=>$("#spouseMask").classList.remove("open"));
