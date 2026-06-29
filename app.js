@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.25.0";
+const APP_VERSION = "v0.26.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -920,6 +920,30 @@ async function aiNormalizeDates(list){
   const r=await fetch("/api/normalize-dates",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({dates:list}) });
   const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j.results||[];
 }
+// 第二个 AI(智谱 GLM)做同样的日期拆解,用于双重验证;未配置 GLM_API_KEY 时后端返回空,这里安静降级
+async function aiNormalizeDatesGLM(list){
+  if(!list.length) return [];
+  const session=await window.SBAUTH.getSession(); const token=session&&session.access_token;
+  const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),28000);   // GLM 慢/挂不阻断导入
+  try{
+    const r=await fetch("/api/normalize-dates-glm",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({dates:list}), signal:ctrl.signal });
+    const j=await r.json().catch(()=>({})); if(!r.ok) return [];
+    return j.results||[];
+  }catch(e){ return []; } finally{ clearTimeout(t); }
+}
+// 双 AI 拆日期:DeepSeek + GLM 并行,逐条对齐;两者对 年/月/日/农历 判断不一致→标 _conflict 供人工核对
+async function aiNormalizeDatesDual(list){
+  if(!list.length) return [];
+  const [ds, glm] = await Promise.all([ aiNormalizeDates(list).catch(()=>[]), aiNormalizeDatesGLM(list).catch(()=>[]) ]);
+  const gmap={}; (glm||[]).forEach(r=>{ if(r&&r.input) gmap[r.input]=r; });
+  return (ds||[]).map(d=>{ const g=gmap[d.input]; if(!g) return d;
+    const conflict = (d.year||null)!==(g.year||null) || (d.month||null)!==(g.month||null) || (d.day||null)!==(g.day||null) || (!!d.is_lunar)!==(!!g.is_lunar);
+    return { ...d, _glm:g, _conflict:conflict }; });
+}
+// 给定原始串与双AI结果,生成一句"不一致"提示(没冲突→"")
+function dateConflictNote(raw, r){ if(!r||!r._conflict||!r._glm) return "";
+  const fmt=x=>x?`${x.year||"?"}年${x.month||"?"}月${x.day||"?"}日·${x.is_lunar?"农历":"公历"}`:"?";
+  return `两模型对「${raw}」判断不一致:DeepSeek=${fmt(r)} / GLM=${fmt(r._glm)},请核对`; }
 const _SHICHEN12=["子","丑","寅","卯","辰","巳","午","未","申","酉","戌","亥"];
 const _shichenOf = h => (window.LUNARCONV&&window.LUNARCONV.shichenOf)?window.LUNARCONV.shichenOf(h):(_SHICHEN12[Math.floor(((h+1)%24)/2)]+"时");
 const _SHENGXIAO=["鼠","牛","虎","兔","龙","蛇","马","羊","猴","鸡","狗","猪"];
@@ -973,7 +997,7 @@ function parseDateParts(raw){
   let mo=s.match(/([正冬腊])月/); if(mo){ o.month=_LMON[mo[1]]; o.is_lunar=true; }
   else if((mo=s.match(/(?:闰)?\s*(\d{1,2})\s*月/)))o.month=+mo[1];
   else if((mo=s.match(/(?:闰)?\s*(十[一二]|[一二三四五六七八九]|十)\s*月/))){ const v=_cnNum(mo[1]); if(v)o.month=v; }
-  const d=_cnDay(s); if(d!=null){ o.day=d; if(/初|廿|卄|卅/.test(s))o.is_lunar=true; }
+  const d=_cnDay(s); if(d!=null){ o.day=d; if(/初|廿|卄|卅/.test(s) || /[一二三四五六七八九十][日号]/.test(s))o.is_lunar=true; }   // 初/廿 或 中文数字日(如"十一日")=农历写法(公历日多写阿拉伯"11日")
   if(o.month==null||o.day==null){ const iso=s.match(/(\d{3,4})[\-\/.](\d{1,2})[\-\/.](\d{1,2})/); if(iso){ o.year=+iso[1];o.month=+iso[2];o.day=+iso[3]; } }
   if(o.month==null){ const i2=s.match(/(\d{3,4})[\-\/.](\d{1,2})(?![\-\/.\d])/); if(i2){ o.year=o.year||+i2[1];o.month=+i2[2]; } }
   if(o.month!=null&&(o.month<1||o.month>12))o.month=null; if(o.day!=null&&(o.day<1||o.day>31))o.day=null;
@@ -1385,8 +1409,10 @@ async function buildPreviewFromIncoming(incList){
   const list=incList.filter(inc=>(inc.name||"").trim());
   _imp.skippedNoName = incList.length - list.length;   // 无姓名行被静默过滤,在预览标题里如实告知
   const aiNeed=new Set();
-  list.forEach(inc=>{ const b=(inc.birth||"").trim(); if(!b) return; inc._braw=b; if(needsAIDate(b)) aiNeed.add(b); });   // 全部走 resolveDate;只有缺年(年号)等才调 AI
-  const mp={}; if(aiNeed.size){ try{ (await aiNormalizeDates([...aiNeed])).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
+  list.forEach(inc=>{ const b=(inc.birth||"").trim(), bl=(inc.birth_lunar||"").trim();
+    const raw = _DATESIG.test(b)?b:(_DATESIG.test(bl)?bl:b); if(!raw){ return; } inc._braw=raw;   // 日期可能在 birth 或 农历列
+    if(needsAIDate(raw) || (parseDateParts(raw).is_lunar && parseDateParts(raw).year)) aiNeed.add(raw); });   // 农历/年号送双AI验证
+  const mp={}; if(aiNeed.size){ try{ (await aiNormalizeDatesDual([...aiNeed])).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
   const messy = s => !(s||"").trim() || /\d{4}|时|分/.test(s);   // 空 或 含年/时=未拆原串,可被万年历清洗版覆盖
   list.forEach(inc=>{ if(!inc._braw) return; const rd=resolveDate(mp[inc._braw], inc._braw);
     if(rd.birth) inc.birth=rd.birth; else inc.birth=inc._braw;                       // 公历(认不出保留原文)
@@ -1457,11 +1483,16 @@ const AI_DRAFT_FIELDS=[
 ];
 // 农历日期落在该年闰月、但原文没标"闰"→ 歧义(正月 vs 闰月差约一个月)。返回闰月号(0=无歧义)
 function lunarLeapAmbiguous(raw){ const cp=parseDateParts(raw); if(!(cp.is_lunar&&cp.year&&cp.month&&!cp.leap)) return 0; const lc=window.LUNARCONV; const lm=(lc&&lc.leapMonthOf)?lc.leapMonthOf(cp.year):0; return lm===cp.month?lm:0; }
-// 把草稿的出生串用万年历拆成 公历/农历(属相)/时辰(客户端优先,年号/民国缺年才调AI);幂等。供 识别 与 创建 共用
+// 出生串里"含日期信号"的判断:用于在 birth / 农历 两个字段里挑出真正放了日期的那个
+const _DATESIG=/\d{4}|年|时|初|廿|卄|卅|腊月|冬月|正月|闰|[一二三四五六七八九十][日号]|[子丑寅卯辰巳午未申酉戌亥]时/;
+// 把草稿的出生串用万年历拆成 公历/农历(属相)/时辰(客户端优先);农历/年号等送双AI(DeepSeek+GLM)验证。幂等,供 识别 与 创建 共用
 async function cleanDraftsDates(drafts){
-  const need=new Set(); drafts.forEach(d=>{ const b=(d.birth||"").trim(); d._braw=b; if(b&&needsAIDate(b)) need.add(b); });
-  const mp={}; if(need.size){ try{ (await aiNormalizeDates([...need])).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
-  drafts.forEach(d=>{ const raw=d._braw; delete d._braw; d._leapWarn=""; if(!raw) return;
+  const need=new Set();
+  drafts.forEach(d=>{ const b=(d.birth||"").trim(), bl=(d.birth_lunar||"").trim();
+    const raw = _DATESIG.test(b)?b:(_DATESIG.test(bl)?bl:b);   // DeepSeek 有时把整串(年月日时)塞进农历字段→取含日期信号的那个当源
+    d._braw=raw; if(raw && (needsAIDate(raw) || (parseDateParts(raw).is_lunar && parseDateParts(raw).year))) need.add(raw); });   // 农历(带年)也送 AI 做双重验证
+  const mp={}; if(need.size){ try{ (await aiNormalizeDatesDual([...need])).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
+  drafts.forEach(d=>{ const raw=d._braw; delete d._braw; d._leapWarn=""; d._dateWarn=""; if(!raw) return;
     const rd=resolveDate(mp[raw], raw);
     if(rd.birth) d.birth=rd.birth;
     if(rd.birth_lunar && _messyDate(d.birth_lunar)) d.birth_lunar=rd.birth_lunar;
@@ -1469,6 +1500,7 @@ async function cleanDraftsDates(drafts){
     // DeepSeek 常把"属羊"塞进备注;换算后农历已含属相 → 去掉纯属相的冗余备注
     if(/^属[鼠牛虎兔龙蛇马羊猴鸡狗猪]$/.test((d.note||"").trim()) && /属[鼠牛虎兔龙蛇马羊猴鸡狗猪]/.test(d.birth_lunar||"")) d.note="";
     const lm=lunarLeapAmbiguous(raw); if(lm) d._leapWarn=`农历${lm}月落在闰${lm}月之年,已按正${lm}月算→${d.birth};若实为闰月,用万年历勾「闰月」改`;
+    d._dateWarn = dateConflictNote(raw, mp[raw]);   // DeepSeek 与 GLM 判断不一致→提示
   });
 }
 function openAI(){ $("#aiText").value=""; $("#aiMsg").textContent=""; $("#aiDrafts").innerHTML=""; $("#aiCreateBar").style.display="none"; _aiDrafts=[]; $("#aiMask").classList.add("open"); }
@@ -1499,7 +1531,8 @@ function renderAIDrafts(){
     const warn=(ex.length||batchDup)
       ? `<span class="aidup">⚠ ${ex.length?("库中已有同名:"+ex.slice(0,3).map(p=>esc(p.name)+"(第"+genStr(p.id)+"代)").join("、")):"本批内重复"}</span><label class="aidraft-skip"><input type="checkbox" data-i="${i}" data-skip${d._skip?" checked":""}> 跳过不建</label>` : "";
     const lw=d._leapWarn?`<span class="aidup" style="background:#fef9c3;color:#854d0e;border-color:#fde68a">⚠ ${esc(d._leapWarn)}</span>`:"";
-    return `<div class="aidraft${d._skip?" skipped":""}"><div class="aidraft-h">#${i+1} ${esc(d.name||"(未命名)")} ${warn}${lw} <button class="btn btn-sm aidraft-del" data-i="${i}">删除此条</button></div><div class="aidraft-grid">`
+    const dw=d._dateWarn?`<span class="aidup" style="background:#fee2e2;color:#991b1b;border-color:#fecaca">⚠ ${esc(d._dateWarn)}</span>`:"";
+    return `<div class="aidraft${d._skip?" skipped":""}"><div class="aidraft-h">#${i+1} ${esc(d.name||"(未命名)")} ${warn}${lw}${dw} <button class="btn btn-sm aidraft-del" data-i="${i}">删除此条</button></div><div class="aidraft-grid">`
     + AI_DRAFT_FIELDS.map(f=>{
         if(f.type==="sex") return `<label>${f.label}<select data-i="${i}" data-k="sex"><option value=""${!d.sex?" selected":""}></option><option${d.sex==="男"?" selected":""}>男</option><option${d.sex==="女"?" selected":""}>女</option></select></label>`;
         return `<label>${f.label}<input data-i="${i}" data-k="${f.k}" value="${esc(d[f.k]||"")}"></label>`;

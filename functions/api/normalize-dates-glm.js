@@ -1,0 +1,88 @@
+// Cloudflare Pages Function —— 第二个 AI(智谱 GLM)拆解出生/卒日期,用于"双重验证"
+// 路由:POST /api/normalize-dates-glm   (随 git push 自动部署)
+// 入参/出参 与 normalize-dates.js 完全一致:{ dates:[...] } → { results:[{ input,is_lunar,year,month,day,leap,time,ok,note }] }
+// 安全:① 仅放行已登录 editor(同 normalize-dates.js);② GLM key 存 CF 环境变量 GLM_API_KEY,绝不入库。
+//        未配置 GLM_API_KEY 时返回空 results(优雅降级,前端只是少了第二意见,不报错)。
+
+const SB_URL  = "https://ktalsyrxueabdisrszde.supabase.co";
+const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0YWxzeXJ4dWVhYmRpc3JzemRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc3MjYsImV4cCI6MjA5ODEwMzcyNn0.Chj8Zdn9BbK7PbpiEoa7iKDmuq_fSab019vL5X5vtPc";
+
+const SYSTEM = `你是中文出生日期/时辰解析助手。把每个输入【拆成结构化字段】——你只负责拆,不做农历↔公历换算(换算由程序的万年历完成):
+- is_lunar: 农历日期=true(出现"初五""腊月""农历""闰X月",或日写成中文数字如"十一日""廿三"等农历写法);公历=false。生肖("属羊")/帝王年号/民国纪年通常配农历,按 true。
+- year: 【公历】年数字。年号/民国/生肖请换算成公历年(如"光绪三年"→1877;"1979…属羊"→1979)。拿不准 null。
+- month: 月数字 1–12(农历输入就填农历月、公历输入就填公历月,别自己换历);只有年→null。
+- day: 日数字 1–31(农历"初五"→5、"廿三"→23、"十一日"→11、"腊月"是月不是日);没有→null。
+- leap: 农历闰月=true,否则 false。
+- time: 24 小时制 "HH:MM"("早9时"→"09:00","下午3点"→"15:00","晚6时"→"18:00","晚9时"→"21:00");给的是时辰名("巳时")就原样返回;没有→""。
+- ok: 至少能定 year=true。
+关键:year 必须是公历年;month/day 按 is_lunar 指示的历法原样填,【不要自己换算成公历月日】。绝不编造,拿不准就 null/""。
+只输出 JSON,不要解释、不要 markdown:
+{"results":[{"input":"原文","is_lunar":false,"year":1979,"month":6,"day":5,"leap":false,"time":"09:00","ok":true,"note":""}]}
+results 顺序与输入一致、长度一致。`;
+
+function json(o, status){ return new Response(JSON.stringify(o), { status: status||200, headers: { "content-type": "application/json; charset=utf-8" } }); }
+function extractJson(s){ try{ return JSON.parse(s); }catch(e){} const a=s.indexOf("{"), b=s.lastIndexOf("}"); if(a>=0&&b>a){ try{ return JSON.parse(s.slice(a,b+1)); }catch(e){} } return null; }
+
+export async function onRequestPost({ request, env }){
+  try{
+    const token = (request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"");
+    if(!token) return json({ error:"未登录" }, 401);
+    const ures = await fetch(SB_URL+"/auth/v1/user", { headers:{ apikey:SB_ANON, authorization:"Bearer "+token } });
+    if(!ures.ok) return json({ error:"登录校验失败,请重新登录" }, 401);
+    const user = await ures.json();
+    if(((user&&user.app_metadata&&user.app_metadata.role)||"viewer")!=="editor") return json({ error:"需要 editor 权限" }, 403);
+
+    const body = await request.json().catch(()=>({}));
+    const dates = Array.isArray(body.dates) ? body.dates.map(x=>String(x||"").trim()).filter(Boolean) : [];
+    if(!dates.length) return json({ results:[] });
+    if(dates.length > 200) return json({ error:"一次最多 200 条,请分批" }, 400);
+
+    const key = env.GLM_API_KEY;
+    if(!key) return json({ results:[], note:"未配置 GLM_API_KEY(第二验证未启用)" });   // 优雅降级:没配 key 就当没有第二意见
+    const model = env.GLM_MODEL || "glm-4.6";
+    const base = (env.GLM_BASE || "https://open.bigmodel.cn/api/paas/v4").replace(/\/+$/,"");
+
+    async function callLLM(messages){
+      const ctrl = new AbortController(); const t = setTimeout(()=>ctrl.abort(), 25000);
+      try{
+        const dres = await fetch(base+"/chat/completions", {
+          method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+key },
+          body: JSON.stringify({ model, stream:false, temperature:0, response_format:{ type:"json_object" }, messages }), signal:ctrl.signal,
+        });
+        if(!dres.ok){ const tx=await dres.text(); throw new Error("GLM 调用失败 ("+dres.status+"): "+tx.slice(0,300)); }
+        const data = await dres.json();
+        return (data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||"";
+      } finally { clearTimeout(t); }
+    }
+    function validate(p){
+      if(!p || !Array.isArray(p.results)) return "顶层必须是 {\"results\":[...]} 且 results 是数组";
+      if(p.results.length !== dates.length) return `results 长度应为 ${dates.length},实际 ${p.results.length}`;
+      for(let i=0;i<p.results.length;i++){ const r=p.results[i];
+        if(typeof r!=="object"||r===null) return `第 ${i+1} 项不是对象`;
+        if(typeof r.input!=="string"||!r.input.trim()) return `第 ${i+1} 项缺 input(必须回显原文)`;
+        if(r.year!=null && !(Number.isInteger(r.year)&&r.year>=1000&&r.year<=2200)) return `第 ${i+1} 项 year 必须是 null 或 1000-2200 的公历年整数`;
+        if(r.month!=null && !(Number.isInteger(r.month)&&r.month>=1&&r.month<=12)) return `第 ${i+1} 项 month 必须 null 或 1-12 整数`;
+        if(r.day!=null && !(Number.isInteger(r.day)&&r.day>=1&&r.day<=31)) return `第 ${i+1} 项 day 必须 null 或 1-31 整数`;
+        if(r.time!=null && typeof r.time!=="string") return `第 ${i+1} 项 time 必须是字符串`;
+      }
+      return "";
+    }
+    let messages=[{ role:"system", content:SYSTEM }, { role:"user", content: JSON.stringify(dates) }];
+    let parsed=null, lastErr="", lastRaw="";
+    for(let attempt=0; attempt<3; attempt++){
+      let content; try{ content=await callLLM(messages); }catch(e){ return json({ results:[], error:String(e.message||e) }); }   // GLM 出错→空(不阻断主流程)
+      lastRaw=content; const p=extractJson(content); const err=validate(p);
+      if(!err){ parsed=p; break; }
+      lastErr=err;
+      messages.push({ role:"assistant", content });
+      messages.push({ role:"user", content:`你上次的输出不合格:${err}。请严格按 system 要求【只输出一个 JSON 对象】,{"results":[...]} 长度必须=${dates.length},顺序与输入一致,每项含 input/is_lunar/year/month/day/leap/time/ok。不要任何解释或 markdown。` });
+    }
+    if(!parsed) return json({ results:[], error:"GLM 多次未返回合格结构:"+lastErr });
+    const map = {}; parsed.results.forEach(r=>{ if(r&&typeof r.input==="string") map[r.input.trim()] = r; });
+    const num = (v,lo,hi) => { const n=parseInt(v); return (Number.isFinite(n)&&n>=lo&&n<=hi)?n:null; };
+    const results = dates.map(d=>{ const r=map[d]||{};
+      const year=num(r.year,1000,2200), month=num(r.month,1,12), day=num(r.day,1,31);
+      return { input:d, is_lunar:r.is_lunar===true, year, month, day, leap:r.leap===true, time:(r.time||"").toString().trim(), ok:(r.ok===true&&!!year), note:(r.note||"") }; });
+    return json({ results, model });
+  }catch(e){ return json({ results:[], error:String((e&&e.message)||e) }); }
+}
