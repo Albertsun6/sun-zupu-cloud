@@ -33,6 +33,7 @@
         </div>
       </details>
       <span class="who" id="whoami"></span>
+      <button class="btn btn-sm" id="pwBtn">🔑 改密码</button>
       <button class="btn btn-sm" id="logoutBtn">登出</button>
     </div>
   </div>
@@ -116,6 +117,18 @@
     <div class="modal-foot"><span class="spacer"></span><button class="btn btn-primary" id="loginBtn">登录</button></div>
     <div class="hint" style="margin-top:.7rem">账号由管理员在 Supabase 后台创建/邀请;忘记密码请联系管理员。未登录看不到任何家谱数据。</div>
     <div class="hint" id="appVerLogin" style="margin-top:.5rem;text-align:right;color:#cbd5e1"></div>
+  </div>
+</div>
+
+<!-- 修改密码 -->
+<div class="mask" id="pwMask">
+  <div class="modal login" role="dialog" aria-modal="true" aria-labelledby="pwTitle">
+    <h2 id="pwTitle">修改密码</h2>
+    <div class="field"><label for="pw_new">新密码(至少 6 位)</label><input type="password" id="pw_new" autocomplete="new-password"/></div>
+    <div class="field"><label for="pw_new2">确认新密码</label><input type="password" id="pw_new2" autocomplete="new-password"/></div>
+    <div class="err" id="pwErr"></div>
+    <div class="modal-foot"><span class="spacer"></span><button class="btn" id="pwCancel">取消</button><button class="btn btn-primary" id="pwSave">保存</button></div>
+    <div class="hint" style="margin-top:.7rem">改的是你自己当前登录账号的密码;保存后下次用新密码登录。</div>
   </div>
 </div>
 
@@ -257,9 +270,9 @@
 </div>
 
 <!-- ?v= 随版本递增,确保部署后浏览器加载最新代码(改版本时同步改这里) -->
-<script src="config.js?v=0.12.5"></script>
-<script type="module" src="db.js?v=0.12.5"></script>
-<script type="module" src="app.js?v=0.12.5"></script>
-<script type="module" src="calendar.js?v=0.12.5"></script>
+<script src="config.js?v=0.12.6"></script>
+<script type="module" src="db.js?v=0.12.6"></script>
+<script type="module" src="app.js?v=0.12.6"></script>
+<script type="module" src="calendar.js?v=0.12.6"></script>
 </body>
 </html>

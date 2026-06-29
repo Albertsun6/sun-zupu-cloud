@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.12.5";
+const APP_VERSION = "v0.12.6";
 const APP_DATE = "2026-06-28";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1136,11 +1136,24 @@ document.addEventListener("keydown", e=>{
     return;
   }
   if(e.key!=="Escape") return;
-  if($("#mask").classList.contains("open")) closeModal();
+  if($("#pwMask")&&$("#pwMask").classList.contains("open")) $("#pwMask").classList.remove("open");
+  else if($("#mask").classList.contains("open")) closeModal();
   else if($("#detailMask").classList.contains("open")) closeDetail();
   else if($("#aiMask")&&$("#aiMask").classList.contains("open")) $("#aiMask").classList.remove("open");
   else if($("#spouseMask")&&$("#spouseMask").classList.contains("open")) $("#spouseMask").classList.remove("open"); });
 $("#logoutBtn").onclick=async()=>{ try{ await window.SBAUTH.signOut(); }catch(e){} location.reload(); };
+$("#pwBtn") && ($("#pwBtn").onclick=()=>{ $("#pw_new").value=""; $("#pw_new2").value=""; $("#pwErr").textContent=""; $("#pwMask").classList.add("open"); setTimeout(()=>{const n=$("#pw_new"); if(n)n.focus();},50); });
+$("#pwCancel") && ($("#pwCancel").onclick=()=>$("#pwMask").classList.remove("open"));
+$("#pwMask") && ($("#pwMask").onclick=e=>{ if(e.target===$("#pwMask")) $("#pwMask").classList.remove("open"); });
+$("#pwSave") && ($("#pwSave").onclick=async()=>{
+  const a=$("#pw_new").value, b=$("#pw_new2").value, msg=$("#pwErr");
+  if((a||"").length<6){ msg.style.color="#b91c1c"; msg.textContent="密码至少 6 位"; return; }
+  if(a!==b){ msg.style.color="#b91c1c"; msg.textContent="两次输入不一致"; return; }
+  $("#pwSave").disabled=true; msg.style.color="#64748b"; msg.textContent="保存中…";
+  try{ const r=await window.SBAUTH.updatePassword(a); if(r&&r.error) throw r.error;
+    msg.style.color="#047857"; msg.textContent="✅ 已修改,下次用新密码登录"; setTimeout(()=>$("#pwMask").classList.remove("open"),1300); }
+  catch(e){ msg.style.color="#b91c1c"; msg.textContent="失败:"+(e.message||e); }
+  $("#pwSave").disabled=false; });
 $("#mask").onclick=e=>{ if(e.target===$("#mask")) closeModal(); };
 $("#dCloseBtn").onclick=closeDetail;
 $("#dEditBtn").onclick=()=>{ const p=byId(state.detailing); closeDetail(); if(p) openEdit(p); };

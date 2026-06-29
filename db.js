@@ -29,6 +29,7 @@ window.SBAUTH = {
   getSession: async () => (await sb.auth.getSession()).data.session,
   signIn: (email, password) => sb.auth.signInWithPassword({ email, password }),
   signOut: () => sb.auth.signOut(),
+  updatePassword: (password) => sb.auth.updateUser({ password }),   // 登录态下改自己密码
   user: currentUser,
   role: async () => roleOf(await currentUser()),
   onChange: (cb) => sb.auth.onAuthStateChange((_e, s) => cb(s)),
