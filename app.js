@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.28.1";
+const APP_VERSION = "v0.29.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -161,7 +161,7 @@ function renderPeopleFilter(count){
   fb.innerHTML=`<div class="rosterfilter" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">`
     +`<input id="peopleSearch" type="text" placeholder="🔍 搜索姓名/字号/备注…" value="${esc(state.q||"")}" style="min-width:11em;flex:0 1 18em">`
     +`${cfRows}<button class="btn btn-sm" id="cfAdd">+ 字段筛选</button>`
-    +`<span class="hint">${count} 人</span>${hasFilter?`<button class="btn btn-sm" id="cfClear">清除</button>`:""}</div>`+recentRow;
+    +`<span class="hint">${count} 人</span>${hasFilter?`<button class="btn btn-sm" id="cfClear">清除</button>`:""}${state.canEdit&&hasFilter&&count>=1?`<button class="btn btn-sm" id="bulkRelBtn" title="把当前筛选出的这些人,批量加为某人的某种关系">🔗 批量加关系</button>`:""}</div>`+recentRow;
   const refocus=sel=>{ const e2=document.querySelector(sel); if(e2){ const v=e2.value; e2.focus(); try{e2.setSelectionRange(v.length,v.length);}catch(_){} } };
   { const rs=$("#peopleSearch"); if(rs){
       const apply=()=>{ state.q=rs.value; renderPeople(); refocus("#peopleSearch"); recordSearchDebounced(); };
@@ -177,6 +177,49 @@ function renderPeopleFilter(count){
   fb.querySelectorAll(".cf-del").forEach(b=>b.onclick=()=>{ state.customFilters.splice(+b.dataset.i,1); renderPeople(); });
   { const a=$("#cfAdd"); if(a) a.onclick=()=>{ (state.customFilters=state.customFilters||[]).push({field:ROSTER_COLS[0].k,op:"contains",val:""}); renderPeople(); }; }
   { const c=$("#cfClear"); if(c) c.onclick=()=>{ state.q=""; state.customFilters=[]; renderPeople(); }; }
+  { const br=$("#bulkRelBtn"); if(br) br.onclick=()=>openBulkRel(peopleFiltered()); }
+}
+// 批量加关系:把当前筛选出的一组人,全部加为某目标人物的某种关系(对称类型,如 同事/朋友/合作)。已存在的跳过;经 REL+history,可逐条撤销。
+function _personOptsBirth(sel,q){ q=(q||"").trim().toLowerCase();
+  let list=state.persons.filter(p=>!p.deleted);
+  if(q) list=list.filter(p=>((p.name||"")+" "+(p.alias||"")+" "+p.id).toLowerCase().includes(q));
+  list=list.sort((a,b)=>(parseInt(a.gen)||0)-(parseInt(b.gen)||0)||(a.sort_order||0)-(b.sort_order||0)).slice(0,300);
+  return list.map(p=>`<option value="${esc(p.id)}"${p.id===sel?" selected":""}>${esc(p.name||"(无名)")}${p.birth?(" · "+esc(p.birth)):""} — ${esc(p.id)}</option>`).join("");
+}
+function openBulkRel(list){
+  list=(list||[]).filter(p=>p&&!p.deleted);
+  const symTypes=(state.relTypes||[]).filter(t=>t.is_symmetric);
+  if(!symTypes.length){ alert("没有可用的对称关系类型(同事/朋友等)"); return; }
+  let mask=$("#bulkRelMask"); if(!mask){ mask=el("div","mask"); mask.id="bulkRelMask"; document.body.appendChild(mask); }
+  const typeOpts=symTypes.map(t=>`<option value="${esc(t.type)}"${t.type==="colleague"?" selected":""}>${esc(t.label_zh)}</option>`).join("");
+  mask.innerHTML=`<div class="modal" style="width:min(560px,100%)"><h2>批量加关系</h2>
+    <p class="hint">把<b>当前筛选出的 ${list.length} 人</b>,全部加为某人的某种(对称)关系。已存在的自动跳过;每条都留痕、可在操作历史逐条撤销。</p>
+    <div class="field"><label>目标人物(和这些人互相建立关系的那个人)</label><div class="inwrap"><input id="brSearch" placeholder="🔍 筛选姓名/字号/ID" style="width:10em;margin-right:.3rem"><select id="brTarget"><option value="">— 选目标人物 —</option>${_personOptsBirth("","")}</select></div></div>
+    <div class="field"><label>关系类型</label><select id="brType">${typeOpts}</select> &nbsp; 备注 <input id="brNote" placeholder="可空,如 银河同事" style="width:11em"></div>
+    <div class="err" id="brMsg"></div>
+    <div class="modal-foot"><span class="spacer"></span><button class="btn" id="brCancel">取消</button><button class="btn btn-primary" id="brRun">确认创建</button></div></div>`;
+  mask.classList.add("open");
+  $("#brCancel").onclick=()=>mask.classList.remove("open");
+  mask.onclick=e=>{ if(e.target===mask) mask.classList.remove("open"); };
+  { const se=$("#brSearch"); if(se) se.oninput=()=>{ const cur=$("#brTarget").value; $("#brTarget").innerHTML=`<option value="">— 选目标人物 —</option>`+_personOptsBirth(cur, se.value); }; }
+  $("#brRun").onclick=async()=>{
+    const target=$("#brTarget").value, type=$("#brType").value, note=$("#brNote").value.trim(), msg=$("#brMsg");
+    if(!target){ msg.textContent="请先选目标人物"; return; }
+    const targets=list.filter(p=>p.id!==target);
+    if(!targets.length){ msg.textContent="没有可连接的人(筛选为空,或只有目标本人)"; return; }
+    const tname=(byId(target)||{}).name||target, tl=(symTypes.find(t=>t.type===type)||{}).label_zh||type;
+    if(!confirm(`把这 ${targets.length} 人 全部加为「${tname}」的「${tl}」?`)) return;
+    const btn=$("#brRun"); btn.disabled=true; btn.textContent="创建中…";
+    let edges=[]; try{ edges=await window.REL.all(); }catch(e){}
+    const has=(a,b)=>edges.some(r=>r.type===type && ((r.from_id===a&&r.to_id===b)||(r.from_id===b&&r.to_id===a)));   // 对称:任一方向都算已存在
+    let ok=0, skip=0; const fails=[];
+    for(const p of targets){ if(has(target,p.id)){ skip++; continue; }
+      try{ await window.REL.add({from_id:target,to_id:p.id,type,note}); ok++; }catch(e){ fails.push((p.name||p.id)+":"+(e.message||e)); } }
+    btn.disabled=false; btn.textContent="确认创建";
+    await reloadPersons(); await refreshRelCount(); renderPeople();
+    mask.classList.remove("open");
+    alert(`完成:新建 ${ok} 条「${tl}」${skip?(" · 跳过 "+skip+" 条已存在"):""}${fails.length?("\n失败 "+fails.length+":\n"+fails.slice(0,10).join("\n")):""}\n(可在「操作历史」逐条撤销)`);
+  };
 }
 // 名册 = 列表 / 卡片 / 孙氏 三页。列表&卡片=全部人;孙氏=只显孙氏(卡片按世代)。计数显示在按钮上。
 function renderPeople(){
