@@ -197,7 +197,7 @@ async function listTranscription(){ return must(await sb.from("transcription").s
 async function listHistory(){ return must(await sb.from("history").select("*").order("id",{ascending:false}).limit(300)); }
 
 // ---------- 撤销 ----------
-const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media"]);
+const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media","create:relationship"]);
 async function undo(hid){
   const h = must(await sb.from("history").select("*").eq("id",hid).maybeSingle());
   if(!h) throw new Error("记录不存在");
@@ -212,6 +212,7 @@ async function undo(hid){
   else if(key==="purge:person"){ if(before) await reinsertPerson(before); summ="撤销彻底删除 → 重建: "+h.entity_id; }
   else if(key==="delete:marriage"){ if(before) await reinsertMarriage(before); summ="撤销删除婚姻"; }
   else if(key==="delete:media"){ if(before) await reinsertMedia(before); summ="撤销删除照片"; }
+  else if(key==="create:relationship"){ must(await sb.from("relationships").delete().eq("id",Number(h.entity_id))); summ="撤销新增关系: "+h.entity_id; }   // 机器/手工建的边一键撤;entity_id 存为字符串,转回数字匹配数值主键(同 delRelationship 的已验证写法)
   must(await sb.from("history").update({ undone:1 }).eq("id",hid));
   await logHist("undo",h.entity,h.entity_id,summ);
   return { ok:true, summary:summ };

@@ -35,8 +35,8 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.12.7";
-const APP_DATE = "2026-06-28";
+const APP_VERSION = "v0.13.0";
+const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
 // L1 节点=纯个人属性。世代(派生)/本族外部/行第/亲属关系/母/父系说明/配偶 已退出表单(关系→边层,世代→推算)。
@@ -45,7 +45,7 @@ const FORM_KEYS = ["id","name","char_gen","alias","sex","birth",
   "occupation","residence","contact","address","deeds","source","status","note"];
 const DIRECT_LINE = new Set(["S001","S002","S004","S008","S010","S014","S019","S033","S046"]);
 const ORIG_IMG = {p1:window.photoUrl("yuanpu/p1.jpg"),p2:window.photoUrl("yuanpu/p2.jpg"),p3:window.photoUrl("yuanpu/p3.jpg"),p4:window.photoUrl("yuanpu/p4.jpg")};
-const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media"]);
+const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media","create:relationship"]);
 
 const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[], relTypes:[], relCount:{}, q:"", share:false,
                 editing:null, user:null, canEdit:false, lineage:"",
@@ -352,7 +352,7 @@ async function renderLog(){
   tb.appendChild(body); box.appendChild(tb);
   box.querySelectorAll(".undo").forEach(b=>b.onclick=async()=>{
     if(!confirm("撤销该操作?")) return;
-    try{ await api("POST","/api/history/"+b.dataset.id+"/undo"); await reloadPersons(); renderOverview(); renderHeader(); renderLog(); }
+    try{ await api("POST","/api/history/"+b.dataset.id+"/undo"); await reloadPersons(); await refreshRelCount(); renderOverview(); renderHeader(); renderLog(); }  // refreshRelCount:撤销关系边后刷新 父/母/配偶 图,避免 UI 残留
     catch(e){ alert("撤销失败:"+e.message); }
   });
 }
@@ -466,6 +466,11 @@ function renderHealth(){
   sec("⑧ 配偶待整理(原始记载→关系)", pend, p=>{ const d=el("div","hitem");
     d.innerHTML=`<a class="plink" data-pid="${esc(p.id)}">${esc(p.name||p.id)}</a> <span class="hint">原文:${esc(p.spouse)}</span>`
       +(state.canEdit?` <button class="btn btn-sm spConvBtn" data-pid="${esc(p.id)}">整理为配偶</button>`:""); return d; }, "pill-info");
+  // ⑨ 可回填另一方父母边(夫妻↔子女联动):孩子只连一方家长,而该家长恰好1个配偶 → 推定另一方父母
+  const bf=backfillCoParentDrafts();
+  sec("⑨ 可回填另一方父母边", bf, d=>{ const role=d.otherType==="mother"?"母":"父"; const div=el("div","hitem");
+    div.innerHTML=`<a class="plink" data-pid="${esc(d.child.id)}">${esc(d.child.name||d.child.id)}</a> <span class="hint">缺${role}边,推定为「${esc(d.coParent.name||"")}」(${esc((byId(d.parentId)||{}).name||"")} 的唯一配偶)</span>`; return div; }, "pill-info");
+  if(state.canEdit && bf.length){ const b=el("button","btn btn-sm btn-primary","一键回填预览…"); b.style.marginTop=".4rem"; b.onclick=openBackfillDialog; if(box.lastChild) box.lastChild.appendChild(b); }
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });   // 先看详情(含关系列表),编辑走详情里「编辑」
   box.querySelectorAll(".spConvBtn").forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openSpouseConverter(b.dataset.pid); });
   box.querySelectorAll(".mergebtn").forEach(b=>b.onclick=()=>{ const g=h.dupName.find(x=>x.name===b.dataset.name); if(g) openMergeDialog(g.list); });
@@ -604,10 +609,13 @@ async function openDetail(p){
       if(other===p.id){ msg.textContent="不能和自己建立关系"; return; }
       const from=fromIsX?other:p.id, to=fromIsX?p.id:other;
       await window.REL.add({from_id:from,to_id:to,type,note});
+      let coRes={};
+      if(type==="father"||type==="mother") coRes=(await maybeLinkCoParent(from,to,type))||{};  // 夫妻↔子女联动:补另一方父母
+      else if(type==="spouse") await maybeSuggestSpouseCoParent(from,to);            // 加配偶→建议补录其已有子女
       const oname=((byId(other)||{}).name)||($("#dq_newname")&&$("#dq_newname").value.trim())||other;
       await reloadPersons(); await refreshRelCount(); await openDetail(byId(p.id));
       const t=$("#relAddToggle"); if(t) t.click();                                  // 重新展开,连续录入
-      const m=$("#dq_msg"); if(m) m.textContent="已加:"+oname+" ✓ 可继续添加下一条";
+      const m=$("#dq_msg"); if(m) m.textContent="已加:"+oname+" ✓"+(coRes.failMsg?(" ⚠ "+coRes.failMsg):"")+" 可继续添加下一条";
     }catch(e){ const m=$("#dq_msg"); if(m) m.textContent=(/duplicate|unique/i.test(e.message)?"该关系已存在":("失败:"+e.message)); }
   };
   $("#detailMask").classList.add("open");
@@ -660,6 +668,160 @@ function initRelAuto(){
   else if(rt==="spouse|s"&&!$("#f_sex").value){ $("#f_sex").value=X.sex==="男"?"女":(X.sex==="女"?"男":""); }       // 配偶性别取反
   const tn=(state.relTypes.find(t=>t.type===rt.split("|")[0])||{}).label_zh||"";
   if(hint&&tn) hint.textContent="保存后将与「"+(X.name||pid)+"」建立关系;世代自动推算";
+}
+
+/* ---------- 自动联动:夫妻 ↔ 子女(另一方父母边)----------
+   本谱多见原配/续娶/侧室,生母/继母不能瞎认。fail-closed 铁律:只有「唯一确定」才自动,稍有不确定一律转人审。规则:
+   ① 加孩子→该家长只有 1 个【可见 + 已知对侧性别】配偶、且无已软删/性别未知的配偶把数目搅浑,才自动建另一方父母边;否则弹窗让人选,绝不静默乱挂。
+   ② 加配偶→伴侣若已有子女,只「建议」补录(默认不勾,防继父母误挂;已有同角色父母的标「可能继子女」)。
+   ③ 存量回填见数据体检 ⑨。机器建的边均 note 标注「据父母婚姻推定」、入操作历史可一键撤销。 */
+const COPARENT_TAG = "据父母婚姻推定";
+const isDup = e => /duplicate|unique/i.test((e&&e.message)||"");        // 唯一索引冲突=幂等,不算失败
+// 某家长全部配偶对端 id(含已软删/悬空者——它们仍在 relationships 表,只是 byId 查不到)
+function spouseEndpointIds(parentId, edges){
+  const out=[]; edges.forEach(r=>{ if(r.type!=="spouse")return; if(r.from_id===parentId)out.push(r.to_id); else if(r.to_id===parentId)out.push(r.from_id); }); return out;
+}
+// fail-closed 决策:唯一「可能的另一方父母」必须【可见 + 已知对侧性别】、且无悬空(软删)/性别未知配偶搅浑,才判 auto。
+//  悬空配偶 → 真实配偶数不确定 → 不 auto(防多妻塌缩成单妻误挂);性别未知 → 可能正是另一方父母 → 不 auto(与「性别未知不猜」一致)。
+//  返回 { mode:'auto'|'prompt'|'skip', autoId, visibleIds, hasHidden }
+function coParentDecision(spouseIds, otherType){
+  const wantSex = otherType==="mother" ? "女" : "男";
+  const oppKnown = otherType==="mother" ? "男" : "女";
+  const links = spouseIds.map(id=>({ id, p:byId(id) }));
+  const hasHidden = links.some(l=>!l.p);                                  // 悬空/软删
+  const possible = links.filter(l=> !l.p || l.p.sex!==oppKnown );         // 可能的另一方父母(排除「已知相反性别」)
+  const knownRight = possible.filter(l=> l.p && l.p.sex===wantSex );
+  const visibleIds = possible.filter(l=>l.p).map(l=>l.id);
+  if(!hasHidden && possible.length===1 && knownRight.length===1) return { mode:"auto", autoId:knownRight[0].id, visibleIds, hasHidden };
+  return { mode: visibleIds.length ? "prompt" : "skip", visibleIds, hasHidden };
+}
+// 给孩子补「另一方父母」边。返回 {failMsg} 供调用方拼到提示(auto 成功无 failMsg;duplicate 视为成功)。
+async function maybeLinkCoParent(parentId, childId, parentEdgeType){
+  if(!state.canEdit) return {};
+  let edges; try{ edges=await window.REL.all(); }catch(e){ return {}; }
+  const otherType = parentEdgeType==="father" ? "mother" : "father";
+  if(edges.some(r=>r.type===otherType && r.to_id===childId)) return {};        // 已有另一方父母,不覆盖
+  const ids=spouseEndpointIds(parentId, edges); if(!ids.length) return {};
+  const dec=coParentDecision(ids, otherType);
+  if(dec.mode==="auto"){
+    try{ await window.REL.add({ from_id:dec.autoId, to_id:childId, type:otherType, note:COPARENT_TAG }); return {}; }
+    catch(e){ return isDup(e)?{}:{ failMsg:"另一方父母边建立失败:"+e.message+"(请在详情页手工补)" }; }
+  }
+  if(dec.mode==="prompt"){
+    const cands=dec.visibleIds.map(id=>{ const p=byId(id)||{}; const e=edges.find(r=>r.type==="spouse"&&((r.from_id===id&&r.to_id===parentId)||(r.to_id===id&&r.from_id===parentId))); return { id, name:p.name, sex:p.sex, role:(e&&e.note)||"", year:(e&&e.start_date)||"" }; });
+    await pickCoParent(cands, parentId, childId, otherType, dec.hasHidden);
+  }
+  return {};                                                                  // skip:无可见候选(只剩软删配偶)→ 静默不挂
+}
+// 多/不确定配偶裁决弹窗(Promise:用户选一位或「暂不」)。默认「暂不」——不替用户猜生母。真失败显示在弹窗内不静默吞。
+function pickCoParent(cands, parentId, childId, otherType, hasHidden){
+  return new Promise(resolve=>{
+    let mask=$("#coparentMask"); if(!mask){ mask=el("div","mask"); mask.id="coparentMask"; document.body.appendChild(mask); }
+    const child=byId(childId), parent=byId(parentId), role=otherType==="mother"?"生母":"生父";
+    const rows=cands.map(c=>`<label class="mergerow"><input type="radio" name="cppick" value="${esc(c.id)}"> <b>${esc(c.name||"(无名)")}</b> <span class="hint">${esc(c.id)}${c.sex?" · "+esc(c.sex):""}${c.role?" · "+esc(c.role):""}${c.year?" · 婚 "+esc(c.year):""}</span></label>`).join("");
+    mask.innerHTML=`<div class="modal" style="width:min(520px,100%)">
+      <h2>选择「${esc((child&&child.name)||"")}」的${role}</h2>
+      <p class="hint">${esc((parent&&parent.name)||"")} 有多位/不确定的配偶,系统不替你猜是谁。选一位(选错可在详情页删除该关系),或暂不指定、留待手工。</p>
+      ${hasHidden?`<p class="hint" style="color:#c0392b">注意:该家长还有已移入回收站的配偶,真实配偶可能不止下列,请谨慎。</p>`:""}
+      ${rows}
+      <label class="mergerow"><input type="radio" name="cppick" value="" checked> 暂不指定(留待手工)</label>
+      <div class="err" id="cpErr"></div>
+      <div class="modal-foot"><span class="spacer"></span><button class="btn" id="cpCancel">跳过</button><button class="btn btn-primary" id="cpOk">确定</button></div>
+    </div>`;
+    mask.classList.add("open");
+    const done=()=>{ mask.classList.remove("open"); resolve(); };
+    $("#cpCancel").onclick=done; mask.onclick=e=>{ if(e.target===mask) done(); };
+    $("#cpOk").onclick=async()=>{
+      const v=((mask.querySelector("input[name=cppick]:checked"))||{}).value||"";
+      if(v){ const c=cands.find(x=>x.id===v);
+        try{ await window.REL.add({ from_id:v, to_id:childId, type:otherType, note:COPARENT_TAG+(c&&c.role?"·"+c.role:"") }); }
+        catch(e){ if(!isDup(e)){ $("#cpErr").textContent="建立失败:"+e.message; return; } } }
+      done();
+    };
+  });
+}
+// 新建夫妻边后:伴侣若已有子女且这位配偶尚未连上→建议补录(默认不勾,防继父母误挂)。性别未知不猜父/母。
+async function maybeSuggestSpouseCoParent(aId, bId){
+  if(!state.canEdit) return;
+  let edges; try{ edges=await window.REL.all(); }catch(e){ return; }
+  const rows=[];
+  const gather=(parentId, spouseId)=>{
+    const sp=byId(spouseId); const spType= sp&&sp.sex==="男"?"father":(sp&&sp.sex==="女"?"mother":null);
+    if(!spType) return;
+    const already=new Set(edges.filter(r=>r.type===spType && r.from_id===spouseId).map(r=>r.to_id));
+    edges.filter(r=>(r.type==="father"||r.type==="mother") && r.from_id===parentId).forEach(r=>{
+      if(already.has(r.to_id) || !byId(r.to_id)) return;
+      const prior=edges.find(x=>x.type===spType && x.to_id===r.to_id && x.from_id!==spouseId);   // 已有同角色父母=可能继子女
+      rows.push({ spouseId, spType, child:byId(r.to_id), priorName: prior?((byId(prior.from_id)||{}).name||"已有"):"" });
+    });
+  };
+  gather(aId,bId); gather(bId,aId);
+  if(!rows.length) return;
+  await suggestSpouseChildren(rows);
+}
+function suggestSpouseChildren(rows){
+  return new Promise(resolve=>{
+    let mask=$("#spkidMask"); if(!mask){ mask=el("div","mask"); mask.id="spkidMask"; document.body.appendChild(mask); }
+    const list=rows.map((r,i)=>{ const role=r.spType==="mother"?"生母":"生父"; const sp=byId(r.spouseId);
+      const warn=r.priorName?` <span class="hint" style="color:#c0392b">已有${r.spType==="mother"?"母":"父"}:${esc(r.priorName)},可能是继子女</span>`:"";
+      return `<label class="mergerow"><input type="checkbox" class="spk" data-i="${i}"> 把 <b>${esc((sp&&sp.name)||"")}</b> 设为 <b>${esc(r.child.name||"(无名)")}</b> 的${role} <span class="hint">第${genStr(r.child.id)}代</span>${warn}</label>`; }).join("");
+    mask.innerHTML=`<div class="modal" style="width:min(560px,100%)">
+      <h2>是否补录为子女的父母?</h2>
+      <p class="hint">配偶的另一方已有子女。<b>仅当确为亲生父母才勾选</b>——续娶/再婚的继父母请留空。默认不勾。</p>
+      <div style="max-height:50vh;overflow:auto">${list}</div>
+      <div class="err" id="spkErr"></div>
+      <div class="modal-foot"><span class="spacer"></span><button class="btn" id="spkCancel">跳过</button><button class="btn btn-primary" id="spkOk">建立所选关系</button></div>
+    </div>`;
+    mask.classList.add("open");
+    const done=()=>{ mask.classList.remove("open"); resolve(); };
+    $("#spkCancel").onclick=done; mask.onclick=e=>{ if(e.target===mask) done(); };
+    $("#spkOk").onclick=async()=>{
+      const picks=[...mask.querySelectorAll(".spk:checked")].map(c=>rows[+c.dataset.i]); const fails=[];
+      for(const r of picks){ try{ await window.REL.add({ from_id:r.spouseId, to_id:r.child.id, type:r.spType, note:"据婚姻补录" }); }catch(e){ if(!isDup(e)) fails.push((r.child.name||r.child.id)+":"+e.message); } }
+      if(fails.length){ $("#spkErr").textContent=fails.length+" 条失败:"+fails.join("; "); return; }
+      done();
+    };
+  });
+}
+// 存量回填草稿:孩子有父无母(或有母无父)、且经 fail-closed 判定该家长唯一确定的另一方父母 → 草稿。多配偶/有软删配偶/性别未知不入列(需手工)。
+function backfillCoParentDrafts(){
+  const F=state.fatherOf, M=state.motherOf, S=state.spouseOf, out=[];
+  state.persons.forEach(c=>{ if(c.deleted) return;
+    const scan=(parentId, otherType)=>{ const dec=coParentDecision(S[parentId]||[], otherType);
+      if(dec.mode==="auto"){ const cp=byId(dec.autoId); if(cp) out.push({ child:c, parentId, otherType, coParent:cp }); } };
+    if(F[c.id] && !M[c.id]) scan(F[c.id], "mother");
+    if(M[c.id] && !F[c.id]) scan(M[c.id], "father");
+  });
+  return out;
+}
+function openBackfillDialog(){
+  const drafts=backfillCoParentDrafts();
+  let mask=$("#backfillMask"); if(!mask){ mask=el("div","mask"); mask.id="backfillMask"; document.body.appendChild(mask); }
+  if(!drafts.length){
+    mask.innerHTML=`<div class="modal" style="width:min(520px,100%)"><h2>回填另一方父母边</h2><p class="hint">没有可回填项(无「家长唯一确定1个对侧配偶、孩子却缺另一方父母边」的情形)。</p><div class="modal-foot"><span class="spacer"></span><button class="btn btn-primary" id="bfClose">关闭</button></div></div>`;
+    mask.classList.add("open"); $("#bfClose").onclick=()=>mask.classList.remove("open"); return;
+  }
+  const rows=drafts.map((d,i)=>{ const role=d.otherType==="mother"?"母":"父"; const parent=byId(d.parentId);
+    return `<label class="mergerow"><input type="checkbox" class="bf" data-i="${i}" checked> <b>${esc(d.child.name||"(无名)")}</b> 的${role} ← <b>${esc(d.coParent.name||"(无名)")}</b> <span class="hint">(${esc((parent&&parent.name)||"")} 的唯一配偶)</span></label>`; }).join("");
+  mask.innerHTML=`<div class="modal" style="width:min(620px,100%)">
+    <h2>回填另一方父母边 <span class="pill pill-info">${drafts.length}</span></h2>
+    <p class="hint">下列孩子只连了一方家长,而该家长<b>唯一确定只有 1 个对侧配偶</b>,据此推定另一方父母。逐条核对,取消勾选不对的,再建立。多配偶/有已删配偶/性别未知的孩子不在此列(需手工指定生母/生父)。建立后可在操作历史或详情页撤销。</p>
+    <div style="max-height:50vh;overflow:auto">${rows}</div>
+    <div class="err" id="bfErr"></div>
+    <div class="modal-foot"><label class="hint"><input type="checkbox" id="bfAll" checked> 全选</label><span class="spacer"></span><button class="btn" id="bfCancel">取消</button><button class="btn btn-primary" id="bfOk">建立所选</button></div>
+  </div>`;
+  mask.classList.add("open");
+  $("#bfCancel").onclick=()=>mask.classList.remove("open"); mask.onclick=e=>{ if(e.target===mask) mask.classList.remove("open"); };
+  $("#bfAll").onclick=e=>{ mask.querySelectorAll(".bf").forEach(c=>c.checked=e.target.checked); };
+  $("#bfOk").onclick=async()=>{
+    const picks=[...mask.querySelectorAll(".bf:checked")].map(c=>drafts[+c.dataset.i]);
+    if(!picks.length){ mask.classList.remove("open"); return; }
+    $("#bfOk").disabled=true; $("#bfOk").textContent="建立中…";
+    let ok=0; const fails=[];
+    for(const d of picks){ try{ await window.REL.add({ from_id:d.coParent.id, to_id:d.child.id, type:d.otherType, note:COPARENT_TAG }); ok++; }catch(e){ if(isDup(e)) ok++; else fails.push((d.child.name||d.child.id)+":"+e.message); } }
+    mask.classList.remove("open"); await reloadPersons(); await refreshRelCount(); renderHeader(); renderOverview(); renderHealth();
+    if(fails.length) alert("已建立 "+ok+" 条,失败 "+fails.length+" 条:\n"+fails.join("\n"));
+  };
 }
 
 /* ---------- 人物详情/编辑弹窗 ---------- */
@@ -727,7 +889,11 @@ async function saveModal(){
         const {type, fromIsX, need}=resolveRel(rt, d.sex||$("#f_sex").value);
         if(!type){ extra=" (「孩子」关系需先填本人性别,未建立——可到详情页补)"; }
         else { const from=fromIsX?rp:row.id, to=fromIsX?row.id:rp;
-          try{ await window.REL.add({from_id:from,to_id:to,type}); const tn=(state.relTypes.find(t=>t.type===type)||{}).label_zh||type; extra=" 已与「"+(((byId(rp)||{}).name)||rp)+"」建立「"+tn+"」关系。"; }
+          try{ await window.REL.add({from_id:from,to_id:to,type});
+            let coRes={};
+            if(type==="father"||type==="mother") coRes=(await maybeLinkCoParent(from,to,type))||{};   // 夫妻↔子女联动
+            else if(type==="spouse") await maybeSuggestSpouseCoParent(from,to);
+            const tn=(state.relTypes.find(t=>t.type===type)||{}).label_zh||type; extra=" 已与「"+(((byId(rp)||{}).name)||rp)+"」建立「"+tn+"」关系。"+(coRes.failMsg?(" ⚠ "+coRes.failMsg):""); }
           catch(e){ extra=" (关系建立失败:"+(/duplicate|unique/i.test(e.message)?"该关系已存在":e.message)+")"; } }
       }
       $("#initRelWrap").style.display="none"; $("#idField").style.display="";
@@ -1136,6 +1302,10 @@ document.addEventListener("keydown", e=>{
     return;
   }
   if(e.key!=="Escape") return;
+  // 联动弹窗优先(可叠在编辑/详情弹窗之上;走各自 Cancel 以兑现 Promise,避免 await 永久挂起)
+  if($("#coparentMask")&&$("#coparentMask").classList.contains("open")){ const b=$("#cpCancel"); if(b)b.click(); return; }
+  if($("#spkidMask")&&$("#spkidMask").classList.contains("open")){ const b=$("#spkCancel"); if(b)b.click(); return; }
+  if($("#backfillMask")&&$("#backfillMask").classList.contains("open")){ const b=$("#bfCancel")||$("#bfClose"); if(b)b.click(); return; }
   if($("#pwMask")&&$("#pwMask").classList.contains("open")) $("#pwMask").classList.remove("open");
   else if($("#mask").classList.contains("open")) closeModal();
   else if($("#detailMask").classList.contains("open")) closeDetail();
