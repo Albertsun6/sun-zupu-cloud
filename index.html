@@ -38,8 +38,7 @@
     </div>
   </div>
   <nav class="tabs">
-    <button class="tab active" data-view="overview">世系总览</button>
-    <button class="tab" data-view="roster">名册</button>
+    <button class="tab active" data-view="roster">名册</button>
     <button class="tab" data-view="tree">家族树</button>
     <button class="tab" data-view="graph">关系图谱</button>
     <button class="tab" data-view="history">家史</button>
@@ -53,13 +52,11 @@
 </header>
 
 <main>
-  <section class="view active" id="view-overview">
+  <section class="view active" id="view-roster">
+    <div class="peoplemode" id="peopleMode" style="display:flex;gap:.4rem;margin-bottom:.6rem;flex-wrap:wrap"></div>
     <div class="filterbar" id="filterBar"></div>
     <p class="note" id="shareNote" style="display:none">分享模式:在世亲属仅显示姓名/字辈/世代,其余信息(含联系方式/住址/照片)已隐藏。</p>
     <div id="overview"></div>
-  </section>
-  <section class="view" id="view-roster">
-    <p class="note">全部人员名册:点表头排序;「列设置」勾选要显示的列(本地记忆);右侧可按族谱筛选。点一行打开编辑/详情。</p>
     <div id="rosterBox"></div>
   </section>
   <section class="view" id="view-tree">
@@ -270,9 +267,9 @@
 </div>
 
 <!-- ?v= 随版本递增,确保部署后浏览器加载最新代码(改版本时同步改这里) -->
-<script src="config.js?v=0.15.0"></script>
-<script type="module" src="db.js?v=0.15.0"></script>
-<script type="module" src="app.js?v=0.15.0"></script>
-<script type="module" src="calendar.js?v=0.15.0"></script>
+<script src="config.js?v=0.16.0"></script>
+<script type="module" src="db.js?v=0.16.0"></script>
+<script type="module" src="app.js?v=0.16.0"></script>
+<script type="module" src="calendar.js?v=0.16.0"></script>
 </body>
 </html>

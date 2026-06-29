@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "谱系";                 // 产品名(品牌,固定);某本谱的名字是 meta.title(数据)
-const APP_VERSION = "v0.15.0";
+const APP_VERSION = "v0.16.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -123,7 +123,7 @@ async function loadAll(){
   ]);
   state.relTypes = await window.REL.types().catch(()=>[]);
   await refreshRelCount();
-  renderHeader(); renderFilters(); renderOverview(); renderHistory(); renderVerify(); renderSource();
+  renderHeader(); renderFilters(); renderPeople(); renderHistory(); renderVerify(); renderSource();
 }
 function renderAuthBar(){       // 显示当前登录者 + 角色;viewer 隐藏所有 .edit-only 控件
   const who=$("#whoami"); if(who) who.textContent = state.user ? (state.user.email + (state.canEdit?" · 可编辑":" · 只读")) : "";
@@ -159,18 +159,31 @@ function renderFilters(){
   const cg=(state.meta&&state.meta.charGen)||[];
   const mk=(label,key,opts)=>{ const s=el("select"); const o0=el("option",null,label); o0.value=""; s.appendChild(o0);
     opts.forEach(v=>{ const o=el("option",null,v); o.value=v; if(state.filters[key]===v)o.selected=true; s.appendChild(o); });
-    s.onchange=()=>{ state.filters[key]=s.value; renderFilters(); renderOverview(); }; return s; };
+    s.onchange=()=>{ state.filters[key]=s.value; renderFilters(); renderPeople(); }; return s; };
   fb.appendChild(mk("全部字辈","charGen",cg));
   fb.appendChild(mk("全部状态","status",["确认","存疑","待考","待补"]));
   fb.appendChild(mk("在世/已故","alive",["是","否"]));
   const lins=lineagesList();
   if(lins.length>1){ const ls=el("select"); const o0=el("option",null,"全部族谱"); o0.value=""; ls.appendChild(o0);
     lins.forEach(l=>{ const o=el("option",null,l.name+"("+l.count+")"); o.value=l.name; if(state.lineage===l.name)o.selected=true; ls.appendChild(o); });
-    ls.onchange=()=>{ state.lineage=ls.value; renderFilters(); renderOverview(); if(document.getElementById("view-tree").classList.contains("active"))renderTree(); }; fb.appendChild(ls); }
+    ls.onchange=()=>{ state.lineage=ls.value; renderFilters(); renderPeople(); if(document.getElementById("view-tree").classList.contains("active"))renderTree(); }; fb.appendChild(ls); }
   const fcEl=el("span","fcount"); fcEl.id="fcount"; fb.appendChild(fcEl);
-  if(state.q||anyFilter()||state.lineage){ const clr=el("button","btn btn-sm","清除"); clr.onclick=()=>{ state.q=""; $("#search").value=""; state.lineage=""; state.filters={charGen:"",status:"",alive:""}; renderFilters(); renderOverview(); }; fb.appendChild(clr); }
+  if(state.q||anyFilter()||state.lineage){ const clr=el("button","btn btn-sm","清除"); clr.onclick=()=>{ state.q=""; $("#search").value=""; state.lineage=""; state.filters={charGen:"",status:"",alive:""}; renderFilters(); renderPeople(); }; fb.appendChild(clr); }
 }
-function renderOverview(){
+// 名册(人物视图)= 列表/卡片(按世代)双模式调度器;模式记本地。世系总览已并入此处。
+function renderPeople(){
+  const mode = state.peopleMode || (state.peopleMode = (localStorage.getItem("people_mode")||"cards"));
+  const sw=$("#peopleMode");
+  if(sw){ sw.innerHTML=[["cards","🃏 卡片(按世代)"],["list","☰ 列表"]].map(([m,l])=>`<button class="btn btn-sm${mode===m?" btn-primary":""}" data-mode="${m}">${l}</button>`).join("");
+    sw.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{ state.peopleMode=b.dataset.mode; try{localStorage.setItem("people_mode",b.dataset.mode);}catch(e){} renderPeople(); }); }
+  const cards = mode!=="list";
+  const fb=$("#filterBar"), ov=$("#overview"), rb=$("#rosterBox"), sn=$("#shareNote");
+  if(fb) fb.style.display=cards?"":"none";
+  if(ov) ov.style.display=cards?"":"none";
+  if(rb) rb.style.display=cards?"none":"";
+  if(cards){ renderFilters(); renderCards(); } else { if(sn) sn.style.display="none"; renderRoster(); }
+}
+function renderCards(){
   const box=$("#overview"); box.innerHTML="";
   $("#shareNote").style.display=state.share?"block":"none";
   const list=state.persons.filter(p=>matchQ(p)&&matchFilter(p)&&(!state.lineage||familiesOf(p.id).includes(state.lineage)));
@@ -272,7 +285,7 @@ function renderFamilies(){
     const hallIn=mkField(card,"堂号",cfg.hall,"如 敦睦堂"); const noteIn=mkField(card,"备注/凡例",cfg.note);
     if(!ro){ const foot=el("div","modal-foot"); const msg=el("span","hint"); const btn=el("button","btn btn-primary btn-sm","保存");
       btn.onclick=async()=>{ meta.families[fam]={ label:labIn.value.trim()||fam, charGen:parseCharGen(cgTa.value), hall:hallIn.value.trim(), note:noteIn.value.trim() };
-        try{ await api("PUT","/api/meta",meta); msg.textContent="已保存 ✓"; state._lineageCache={}; state.lineages=null; renderFamilies(); renderHeader(); renderOverview(); renderFilters(); }catch(e){ msg.textContent="失败:"+e.message; } };
+        try{ await api("PUT","/api/meta",meta); msg.textContent="已保存 ✓"; state._lineageCache={}; state.lineages=null; renderFamilies(); renderHeader(); renderPeople(); renderFilters(); }catch(e){ msg.textContent="失败:"+e.message; } };
       foot.appendChild(el("span","spacer")); foot.appendChild(msg); foot.appendChild(btn); card.appendChild(foot); }
     box.appendChild(card);
   });
@@ -319,7 +332,7 @@ async function renderTrash(){
     r.innerHTML=`<div class="vtop"><span class="vtopic">${esc(p.name||p.id)}</span><span class="tag">第${genStr(p.id)}代</span><span class="hint">删除于 ${esc(p.deleted_at||"")}</span></div>`;
     const foot=el("div","modal-foot");
     const rb=el("button","btn btn-primary btn-sm","恢复"); const pb=el("button","btn btn-danger btn-sm","彻底删除");
-    rb.onclick=async()=>{await api("POST","/api/persons/"+encodeURIComponent(p.id)+"/restore");await reloadPersons();renderTrash();renderOverview();renderHeader();};
+    rb.onclick=async()=>{await api("POST","/api/persons/"+encodeURIComponent(p.id)+"/restore");await reloadPersons();renderTrash();renderPeople();renderHeader();};
     pb.onclick=async()=>{if(!confirm("彻底删除「"+(p.name||p.id)+"」?(操作历史里仍可撤销重建)"))return;await api("DELETE","/api/persons/"+encodeURIComponent(p.id)+"/purge");renderTrash();};
     foot.appendChild(el("span","spacer")); if(state.canEdit){ foot.appendChild(rb); foot.appendChild(pb); } else foot.appendChild(el("span","hint","(只读)"));
     r.appendChild(foot); box.appendChild(r);
@@ -354,7 +367,7 @@ async function renderLog(){
   tb.appendChild(body); box.appendChild(tb);
   box.querySelectorAll(".undo").forEach(b=>b.onclick=async()=>{
     if(!confirm("撤销该操作?")) return;
-    try{ await api("POST","/api/history/"+b.dataset.id+"/undo"); await reloadPersons(); await refreshRelCount(); renderOverview(); renderHeader(); renderLog(); }  // refreshRelCount:撤销关系边后刷新 父/母/配偶 图,避免 UI 残留
+    try{ await api("POST","/api/history/"+b.dataset.id+"/undo"); await reloadPersons(); await refreshRelCount(); renderPeople(); renderHeader(); renderLog(); }  // refreshRelCount:撤销关系边后刷新 父/母/配偶 图,避免 UI 残留
     catch(e){ alert("撤销失败:"+e.message); }
   });
 }
@@ -411,9 +424,9 @@ function mediaItem(md){
   const cap=el("input"); cap.type="text"; cap.placeholder="说明/年代"; cap.value=md.caption||"";
   const star=el("button","btn btn-sm"+(md.is_primary?" btn-primary":""), md.is_primary?"★ 主图":"设为主图");
   const del=el("button","btn btn-sm btn-danger","删除");
-  star.onclick=async()=>{await api("PUT","/api/media/"+md.id,{is_primary:1});await renderMedia(state.editing);await reloadPersons();renderOverview();};
+  star.onclick=async()=>{await api("PUT","/api/media/"+md.id,{is_primary:1});await renderMedia(state.editing);await reloadPersons();renderPeople();};
   cap.onchange=async()=>{await api("PUT","/api/media/"+md.id,{caption:cap.value});};
-  del.onclick=async()=>{if(!confirm("删除这张照片?"))return;await api("DELETE","/api/media/"+md.id);await renderMedia(state.editing);await reloadPersons();renderOverview();};
+  del.onclick=async()=>{if(!confirm("删除这张照片?"))return;await api("DELETE","/api/media/"+md.id);await renderMedia(state.editing);await reloadPersons();renderPeople();};
   it.innerHTML=`<img src="${esc(window.photoUrl(md.path))}" alt="" style="cursor:zoom-in"/>`;
   it.querySelector("img").onclick=()=>openLightbox(window.photoUrl(md.path));
   const ctl=el("div","gctl"); ctl.appendChild(cap); const row=el("div","subrow-line"); row.appendChild(star); row.appendChild(del); ctl.appendChild(row);
@@ -486,7 +499,7 @@ function renderHealth(){
   if(state.canEdit && aliveBlank.length){ const b=el("button","btn btn-sm btn-primary",`把空白在世统一设为「是」(${aliveBlank.length})`); b.style.marginTop=".4rem";
     b.onclick=async()=>{ if(!confirm(`把 ${aliveBlank.length} 位「在世」为空的人统一标为「是」?可在操作历史逐条撤销。`)) return; b.disabled=true; b.textContent="处理中…";
       let ok=0; const fails=[]; for(const p of aliveBlank){ try{ await api("PUT","/api/persons/"+encodeURIComponent(p.id),{alive:"是"}); ok++; }catch(e){ fails.push((p.name||p.id)+":"+e.message); } }
-      await reloadPersons(); await refreshRelCount(); renderHeader(); renderOverview(); renderHealth();
+      await reloadPersons(); await refreshRelCount(); renderHeader(); renderPeople(); renderHealth();
       if(fails.length) alert(`已改 ${ok} 条,失败 ${fails.length}:\n`+fails.join("\n")); };
     if(box.lastChild) box.lastChild.appendChild(b); }
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });   // 先看详情(含关系列表),编辑走详情里「编辑」
@@ -494,7 +507,7 @@ function renderHealth(){
   box.querySelectorAll(".mergebtn").forEach(b=>b.onclick=()=>{ const g=h.dupName.find(x=>x.name===b.dataset.name); if(g) openMergeDialog(g.list); });
   box.querySelectorAll(".useGenBtn").forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); const pid=b.dataset.pid;
     if(!confirm("清除该人手填世代,改由父系图自动推算?")) return;
-    try{ await api("PUT","/api/persons/"+encodeURIComponent(pid),{gen:""}); await reloadPersons(); await refreshRelCount(); renderHeader(); renderOverview(); renderHealth(); }
+    try{ await api("PUT","/api/persons/"+encodeURIComponent(pid),{gen:""}); await reloadPersons(); await refreshRelCount(); renderHeader(); renderPeople(); renderHealth(); }
     catch(err){ alert("失败:"+err.message); } });
 }
 // 合并对话框:选保留谁,其余并入(子女/关系/婚姻/照片/空字段都迁过去,被并入者进回收站)
@@ -520,7 +533,7 @@ function openMergeDialog(list){
     if(!confirm("确认把 "+dups.length+" 条并入「"+((byId(surv)||{}).name||surv)+"」?不可一键撤销。")) return;
     $("#mergeOk").disabled=true; $("#mergeErr").textContent="合并中…";
     try{ for(const d of dups){ await window.DEDUP.merge(surv, d.id); }
-      mask.classList.remove("open"); await reloadPersons(); renderHeader(); renderOverview(); renderHealth(); }
+      mask.classList.remove("open"); await reloadPersons(); renderHeader(); renderPeople(); renderHealth(); }
     catch(e){ $("#mergeErr").textContent="失败:"+e.message; }
     $("#mergeOk").disabled=false;
   };
@@ -853,7 +866,7 @@ function openBackfillDialog(){
     $("#bfOk").disabled=true; $("#bfOk").textContent="建立中…";
     let ok=0; const fails=[];
     for(const d of picks){ try{ await window.REL.add({ from_id:d.coParent.id, to_id:d.child.id, type:d.otherType, note:COPARENT_TAG }); ok++; }catch(e){ if(isDup(e)) ok++; else fails.push((d.child.name||d.child.id)+":"+e.message); } }
-    mask.classList.remove("open"); await reloadPersons(); await refreshRelCount(); renderHeader(); renderOverview(); renderHealth();
+    mask.classList.remove("open"); await reloadPersons(); await refreshRelCount(); renderHeader(); renderPeople(); renderHealth();
     if(fails.length) alert("已建立 "+ok+" 条,失败 "+fails.length+" 条:\n"+fails.join("\n"));
   };
 }
@@ -910,7 +923,7 @@ async function saveModal(){
     if(state.editing){
       await api("PUT","/api/persons/"+encodeURIComponent(state.editing),d);
       await reconcileFatherEdge(state.editing, fsel);
-      closeModal(); await reloadPersons(); await refreshRelCount(); renderHeader(); renderOverview();
+      closeModal(); await reloadPersons(); await refreshRelCount(); renderHeader(); renderPeople();
     } else {
       if(d.name){ const same=await window.DEDUP.sameName(d.name,null);
         if(same.length && !confirm("已有 "+same.length+" 个同名:"+same.map(s=>(s.name)+"(第"+(s.gen||"?")+"代)").join("、")+"。\n同名可能是不同人。仍要创建?")) return; }
@@ -933,7 +946,7 @@ async function saveModal(){
           catch(e){ extra=" (关系建立失败:"+(/duplicate|unique/i.test(e.message)?"该关系已存在":e.message)+")"; } }
       }
       $("#initRelWrap").style.display="none"; $("#idField").style.display="";
-      await reloadPersons(); await refreshRelCount(); renderHeader(); renderOverview();
+      await reloadPersons(); await refreshRelCount(); renderHeader(); renderPeople();
       fillFatherSelect(row.id, state.fatherOf[row.id]||""); renderMedia(row.id);
       $("#modalErr").innerHTML=`<div class="callout ok"><span>✅ 已创建「${esc(row.name||row.id)}」。${esc(extra)}</span><span class="spacer"></span><button type="button" class="btn btn-sm" id="acPhoto">+ 上传照片</button><button type="button" class="btn btn-sm" id="acRel">+ 再加一位亲属</button><button type="button" class="btn btn-sm btn-primary" id="acDone">完成</button></div>`;
       const ph=$("#acPhoto"); if(ph) ph.onclick=()=>$("#mediaFile").click();
@@ -945,7 +958,7 @@ async function saveModal(){
 async function delModal(){
   if(!state.editing) return;
   if(!confirm("将该人物移入回收站(可恢复)?")) return;
-  try{ await api("DELETE","/api/persons/"+encodeURIComponent(state.editing)); closeModal(); await reloadPersons(); renderHeader(); renderOverview(); }
+  try{ await api("DELETE","/api/persons/"+encodeURIComponent(state.editing)); closeModal(); await reloadPersons(); renderHeader(); renderPeople(); }
   catch(e){ $("#modalErr").textContent="删除失败:"+e.message; }
 }
 function compressImage(file){   // 上传前缩放压缩(>1600px 缩到 1600,转 JPEG q0.85),失败则原样
@@ -971,7 +984,7 @@ async function uploadMedia(file){
   try{
     const dataUrl=await compressImage(file);
     await api("POST","/api/persons/"+encodeURIComponent(state.editing)+"/media",{filename:file.name,dataUrl});
-    await renderMedia(state.editing); await reloadPersons(); renderOverview();
+    await renderMedia(state.editing); await reloadPersons(); renderPeople();
   }catch(e){ $("#modalErr").textContent="上传失败:"+e.message; }
 }
 
@@ -1152,7 +1165,7 @@ async function aiCreateAll(){
   const btn=$("#aiCreateAll"); btn.disabled=true; let ok=0, fail=0;
   for(const d of valid){ try{ await api("POST","/api/persons",{ ...d, status:"待考" }); ok++; }catch(e){ fail++; } }
   btn.disabled=false;
-  await reloadPersons(); renderOverview(); renderHeader();
+  await reloadPersons(); renderPeople(); renderHeader();
   $("#aiMsg").textContent=`已创建 ${ok} 人${fail?(",失败 "+fail):""}`;
   _aiDrafts=[]; renderAIDrafts();
   if(!fail) setTimeout(()=>$("#aiMask").classList.remove("open"), 1200);
@@ -1278,7 +1291,7 @@ async function confirmSpouseConvert(){
       r.done=true; ok++;
     }catch(e){ fail++; r._err=e.message; }
   }
-  await reloadPersons(); await refreshRelCount(); renderHeader(); renderOverview();
+  await reloadPersons(); await refreshRelCount(); renderHeader(); renderPeople();
   const fresh=byId(p.id)||p;
   const allNamedDone=_spConv.rows.every(r=>r.done || !(r.name||"").trim());   // 无名行有意不建,不算"未完成"
   const unnamed=_spConv.rows.filter(r=>!r.done && !(r.name||"").trim()).length;
@@ -1299,21 +1312,22 @@ async function confirmSpouseConvert(){
 
 /* ---------- 标签切换 ---------- */
 function switchView(name){
+  if(name==="overview") name="roster";   // 世系总览已并入名册;旧链接/书签兼容
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.view===name));
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
   $("#view-"+name).classList.add("active");
   if(location.hash!=="#"+name) location.hash=name;
   if(name==="tree") renderTree();
   if(name==="graph") renderGraph();
-  if(name==="roster") renderRoster();
+  if(name==="roster") renderPeople();
   if(name==="families") renderFamilies();
   if(name==="trash") renderTrash();
   if(name==="health") renderHealth();
   if(name==="log"){ renderBackup(); renderLog(); }
 }
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchView(t.dataset.view));
-$("#search").oninput=e=>{ state.q=e.target.value; renderFilters(); renderOverview(); if(document.getElementById("view-roster").classList.contains("active")) renderRoster(); };
-$("#shareMode").onchange=e=>{ state.share=e.target.checked; renderOverview(); };
+$("#search").oninput=e=>{ state.q=e.target.value; renderPeople(); };
+$("#shareMode").onchange=e=>{ state.share=e.target.checked; renderPeople(); };
 $("#addBtn").onclick=()=>openEdit(null);
 $("#saveBtn").onclick=saveModal;
 $("#delBtn").onclick=delModal;
