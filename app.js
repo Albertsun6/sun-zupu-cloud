@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.27.0";
+const APP_VERSION = "v0.28.0";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -123,7 +123,7 @@ async function loadAll(){
   ]);
   state.relTypes = await window.REL.types().catch(()=>[]);
   await refreshRelCount();
-  renderHeader(); renderFilters(); renderPeople(); renderHistory(); renderVerify(); renderSource();
+  renderHeader(); renderPeople(); renderHistory(); renderVerify(); renderSource();
 }
 function renderAuthBar(){       // 显示当前登录者 + 角色;viewer 隐藏所有 .edit-only 控件
   const who=$("#whoami"); if(who) who.textContent = state.user ? (state.user.email + (state.canEdit?" · 可编辑":" · 只读")) : "";
@@ -144,25 +144,39 @@ function matchQ(p){
   return [p.id,p.name,p.alias,p.note,p.deeds,p.residence,p.char_gen,p.occupation,p.birth_place,p.birth,p.death]
     .join(" ").toLowerCase().includes(state.q.toLowerCase());
 }
-function anyFilter(){ return !!(state.filters.charGen||state.filters.status||state.filters.alive); }
-function matchFilter(p){
-  const f=state.filters;
-  if(f.charGen && p.char_gen!==f.charGen) return false;
-  if(f.status && p.status!==f.status) return false;
-  if(f.alive && p.alive!==f.alive) return false;
-  return true;
+// 三个模式(列表/卡片/孙氏)共用的过滤后列表:搜索(state.q)+ 自定义字段筛选(state.customFilters)+ 孙氏分页(state.lineage)
+function peopleFiltered(){
+  let list=state.persons.filter(p=>!p.deleted && matchQ(p) && (!state.lineage||familiesOf(p.id).includes(state.lineage)));
+  (state.customFilters||[]).forEach(f=>{ const v=(f.val||"").trim().toLowerCase(); if(!v) return;   // 多条 AND
+    list=list.filter(p=>{ const cell=String(cellVal(p,f.field)??"").toLowerCase(); return f.op==="eq"?cell===v:cell.includes(v); }); });
+  return list;
 }
-function renderFilters(){
-  const fb=$("#filterBar"); if(!fb) return; fb.innerHTML="";
-  const cg=(state.meta&&state.meta.charGen)||[];
-  const mk=(label,key,opts)=>{ const s=el("select"); const o0=el("option",null,label); o0.value=""; s.appendChild(o0);
-    opts.forEach(v=>{ const o=el("option",null,v); o.value=v; if(state.filters[key]===v)o.selected=true; s.appendChild(o); });
-    s.onchange=()=>{ state.filters[key]=s.value; renderFilters(); renderPeople(); }; return s; };
-  fb.appendChild(mk("全部字辈","charGen",cg));
-  fb.appendChild(mk("全部状态","status",["确认","存疑","待考","待补"]));
-  fb.appendChild(mk("在世/已故","alive",["是","否"]));
-  const fcEl=el("span","fcount"); fcEl.id="fcount"; fb.appendChild(fcEl);   // 族谱筛选已去除(非孙氏识别不准);孙氏改为独立分页
-  if(state.q||anyFilter()){ const clr=el("button","btn btn-sm","清除"); clr.onclick=()=>{ state.q=""; $("#search").value=""; state.filters={charGen:"",status:"",alive:""}; renderFilters(); renderPeople(); }; fb.appendChild(clr); }
+// 共用的「搜索 + 字段筛选」条,渲染进 #filterBar(列表/卡片/孙氏 同一套);count=过滤后人数
+function renderPeopleFilter(count){
+  const fb=$("#filterBar"); if(!fb) return;
+  const cfRows=(state.customFilters||[]).map((f,i)=>`<span class="cfrow" style="display:inline-flex;gap:.2rem;align-items:center"><select class="cf-field" data-i="${i}">${ROSTER_COLS.map(c=>`<option value="${c.k}"${c.k===f.field?" selected":""}>${esc(c.label)}</option>`).join("")}</select><select class="cf-op" data-i="${i}"><option value="contains"${f.op!=="eq"?" selected":""}>包含</option><option value="eq"${f.op==="eq"?" selected":""}>等于</option></select><input class="cf-val" data-i="${i}" value="${esc(f.val||"")}" placeholder="值" style="width:7em"><button class="btn btn-sm cf-del" data-i="${i}" title="删条件">✕</button></span>`).join("");
+  const hasFilter=(state.q||"").trim()||(state.customFilters||[]).some(f=>(f.val||"").trim());
+  const recent=recentSearches().filter(t=>t!==(state.q||"").trim());
+  const recentRow=recent.length?`<div class="recentsearch" style="display:flex;gap:.3rem;flex-wrap:wrap;align-items:center;margin:.25rem 0 0"><span class="hint">最近搜索:</span>${recent.map(t=>`<button class="btn btn-sm rs-chip" data-q="${esc(t)}">${esc(t)}</button>`).join("")}<button class="btn btn-sm rs-clear" title="清空搜索历史">🗑 清空</button></div>`:"";
+  fb.innerHTML=`<div class="rosterfilter" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">`
+    +`<input id="peopleSearch" type="text" placeholder="🔍 搜索姓名/字号/备注…" value="${esc(state.q||"")}" style="min-width:11em;flex:0 1 18em">`
+    +`${cfRows}<button class="btn btn-sm" id="cfAdd">+ 字段筛选</button>`
+    +`<span class="hint">${count} 人</span>${hasFilter?`<button class="btn btn-sm" id="cfClear">清除</button>`:""}</div>`+recentRow;
+  const refocus=sel=>{ const e2=document.querySelector(sel); if(e2){ const v=e2.value; e2.focus(); try{e2.setSelectionRange(v.length,v.length);}catch(_){} } };
+  { const rs=$("#peopleSearch"); if(rs){
+      const apply=()=>{ state.q=rs.value; renderPeople(); refocus("#peopleSearch"); recordSearchDebounced(); };
+      rs.oninput=e=>{ if(e.isComposing) return; apply(); };          // 拼音组合中不重渲染(否则销毁输入框打断输入法)
+      rs.oncompositionend=apply;
+      rs.onkeydown=e=>{ if(e.key==="Enter"){ pushRecentSearch(rs.value); renderPeople(); refocus("#peopleSearch"); } }; } }
+  fb.querySelectorAll(".rs-chip").forEach(b=>b.onclick=()=>{ state.q=b.dataset.q; pushRecentSearch(state.q); renderPeople(); });
+  { const rc=fb.querySelector(".rs-clear"); if(rc) rc.onclick=()=>{ clearRecentSearches(); renderPeople(); }; }
+  fb.querySelectorAll(".cf-field").forEach(s=>s.onchange=()=>{ state.customFilters[+s.dataset.i].field=s.value; renderPeople(); });
+  fb.querySelectorAll(".cf-op").forEach(s=>s.onchange=()=>{ state.customFilters[+s.dataset.i].op=s.value; renderPeople(); });
+  fb.querySelectorAll(".cf-val").forEach(inp=>{ const apply=()=>{ const i=+inp.dataset.i; state.customFilters[i].val=inp.value; renderPeople(); refocus('.cf-val[data-i="'+i+'"]'); };
+    inp.oninput=e=>{ if(e.isComposing) return; apply(); }; inp.oncompositionend=apply; });
+  fb.querySelectorAll(".cf-del").forEach(b=>b.onclick=()=>{ state.customFilters.splice(+b.dataset.i,1); renderPeople(); });
+  { const a=$("#cfAdd"); if(a) a.onclick=()=>{ (state.customFilters=state.customFilters||[]).push({field:ROSTER_COLS[0].k,op:"contains",val:""}); renderPeople(); }; }
+  { const c=$("#cfClear"); if(c) c.onclick=()=>{ state.q=""; state.customFilters=[]; renderPeople(); }; }
 }
 // 名册 = 列表 / 卡片 / 孙氏 三页。列表&卡片=全部人;孙氏=只显孙氏(卡片按世代)。计数显示在按钮上。
 function renderPeople(){
@@ -174,18 +188,17 @@ function renderPeople(){
     sw.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{ state.peopleMode=b.dataset.mode; try{localStorage.setItem("people_view",b.dataset.mode);}catch(e){} renderPeople(); }); }
   const isList = mode==="list";
   state.lineage = mode==="sun" ? "孙氏" : "";       // 孙氏页只显孙氏;列表/卡片显全部
-  const showCards = !isList;
+  const list = peopleFiltered();                    // 三模式共用同一套 搜索+筛选 结果
+  renderPeopleFilter(list.length);                  // 共用筛选条(渲染进 #filterBar,始终显示)
   const fb=$("#filterBar"), ov=$("#overview"), rb=$("#rosterBox"), sn=$("#shareNote");
-  if(fb) fb.style.display=showCards?"":"none";
-  if(ov) ov.style.display=showCards?"":"none";
-  if(rb) rb.style.display=showCards?"none":"";
-  if(showCards){ renderFilters(); renderCards(); } else { if(sn) sn.style.display="none"; renderRoster(); }
+  if(fb) fb.style.display="";
+  if(ov) ov.style.display=isList?"none":"";
+  if(rb) rb.style.display=isList?"":"none";
+  if(sn) sn.style.display=(!isList&&state.share)?"block":"none";
+  if(isList) renderRoster(list); else renderCards(list);
 }
-function renderCards(){
+function renderCards(list){
   const box=$("#overview"); box.innerHTML="";
-  $("#shareNote").style.display=state.share?"block":"none";
-  const list=state.persons.filter(p=>matchQ(p)&&matchFilter(p)&&(!state.lineage||familiesOf(p.id).includes(state.lineage)));
-  const fc=$("#fcount"); if(fc) fc.textContent=(state.q||anyFilter()||state.lineage)?`找到 ${list.length} 人`:`共 ${state.persons.length} 人`;
   if(!list.length){ box.appendChild(el("p","note","无匹配人物。")); return; }
   // 平铺卡片(不按世代分组——世代是孙系概念,不适合混合人群);仍按 世代→排序号 排个顺序,但不显「第N代」头
   const cards=el("div","cards");
@@ -276,7 +289,7 @@ function renderFamilies(){
     const hallIn=mkField(card,"堂号",cfg.hall,"如 敦睦堂"); const noteIn=mkField(card,"备注/凡例",cfg.note);
     if(!ro){ const foot=el("div","modal-foot"); const msg=el("span","hint"); const btn=el("button","btn btn-primary btn-sm","保存");
       btn.onclick=async()=>{ meta.families[fam]={ label:labIn.value.trim()||fam, charGen:parseCharGen(cgTa.value), hall:hallIn.value.trim(), note:noteIn.value.trim() };
-        try{ await api("PUT","/api/meta",meta); msg.textContent="已保存 ✓"; state._lineageCache={}; state.lineages=null; renderFamilies(); renderHeader(); renderPeople(); renderFilters(); }catch(e){ msg.textContent="失败:"+e.message; } };
+        try{ await api("PUT","/api/meta",meta); msg.textContent="已保存 ✓"; state._lineageCache={}; state.lineages=null; renderFamilies(); renderHeader(); renderPeople(); }catch(e){ msg.textContent="失败:"+e.message; } };
       foot.appendChild(el("span","spacer")); foot.appendChild(msg); foot.appendChild(btn); card.appendChild(foot); }
     box.appendChild(card);
   });
@@ -1290,52 +1303,24 @@ function recordSearchDebounced(){ clearTimeout(_searchRecTimer); _searchRecTimer
 function cellVal(p,k){
   if(k==="birth_lunar"){ const bl=(p.birth_lunar||"").trim(), sx=shengXiaoLabel(p); return bl?(sx?bl+" "+sx:bl):(sx||""); }   // 农历列附属相(缺则按年补)
   return k==="rel_count"?(state.relCount[p.id]||0):(k==="gen"?(genOf(p.id)??""):(k==="lineage"?familiesOf(p.id).join(" / "):(p[k]==null?"":p[k]))); }
-function renderRoster(){
+function renderRoster(list){   // list 由 renderPeople 传入(已搜索+筛选);本函数只管 列设置 / 排序 / 表格
   const box=$("#rosterBox"); if(!box) return;
   const colset=new Set(rosterCols());
   const orderedCols=ROSTER_COLS.filter(c=>colset.has(c.k));
-  let list=state.persons.filter(p=>!p.deleted && matchQ(p));
-  (state.customFilters||[]).forEach(f=>{ const v=(f.val||"").trim().toLowerCase(); if(!v) return;   // 自定义字段筛选(AND)
-    list=list.filter(p=>{ const cell=String(cellVal(p,f.field)??"").toLowerCase(); return f.op==="eq"?cell===v:cell.includes(v); }); });
   const sk=_rosterSort.k, dir=_rosterSort.dir;
-  list=list.slice().sort((a,b)=>{ let va,vb; if(sk==="gen"){va=gk(genOf(a.id));vb=gk(genOf(b.id));} else if(sk==="rel_count"){va=state.relCount[a.id]||0;vb=state.relCount[b.id]||0;} else if(sk==="lineage"){va=familiesOf(a.id).join("/");vb=familiesOf(b.id).join("/");} else {va=(a[sk]??"")+"";vb=(b[sk]??"")+"";}
+  list=(list||peopleFiltered()).slice().sort((a,b)=>{ let va,vb; if(sk==="gen"){va=gk(genOf(a.id));vb=gk(genOf(b.id));} else if(sk==="rel_count"){va=state.relCount[a.id]||0;vb=state.relCount[b.id]||0;} else if(sk==="lineage"){va=familiesOf(a.id).join("/");vb=familiesOf(b.id).join("/");} else {va=(a[sk]??"")+"";vb=(b[sk]??"")+"";}
     return va<vb?-dir:va>vb?dir:0; });
   const picker=`<details class="colpick"${_colpickOpen?" open":""}><summary>列设置(${colset.size} 列)</summary><div class="colgrid">`
     + ROSTER_COLS.map(c=>`<label><input type="checkbox" data-col="${c.k}"${colset.has(c.k)?" checked":""}> ${esc(c.label)}</label>`).join("") + `</div></details>`;
   const bar=`<div class="rosterbar">${picker}<span class="hint">点表头排序 · 点一行${state.canEdit?"看详情/编辑":"看详情"}</span></div>`;
-  // 筛选行(列设置行之后):查找(从顶栏移来)+ 自定义字段筛选(可多条 AND)
-  const cfRows=(state.customFilters||[]).map((f,i)=>`<span class="cfrow" style="display:inline-flex;gap:.2rem;align-items:center"><select class="cf-field" data-i="${i}">${ROSTER_COLS.map(c=>`<option value="${c.k}"${c.k===f.field?" selected":""}>${esc(c.label)}</option>`).join("")}</select><select class="cf-op" data-i="${i}"><option value="contains"${f.op!=="eq"?" selected":""}>包含</option><option value="eq"${f.op==="eq"?" selected":""}>等于</option></select><input class="cf-val" data-i="${i}" value="${esc(f.val||"")}" placeholder="值" style="width:7em"><button class="btn btn-sm cf-del" data-i="${i}" title="删条件">✕</button></span>`).join("");
-  const hasFilter=(state.q||"").trim()||(state.customFilters||[]).some(f=>(f.val||"").trim());
-  const filterRow=`<div class="rosterfilter" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin:.5rem 0">`
-    +`<input id="rosterSearch" type="text" placeholder="🔍 搜索姓名/字号/备注…" value="${esc(state.q||"")}" style="min-width:11em;flex:0 1 16em">`
-    +`${cfRows}<button class="btn btn-sm" id="cfAdd">+ 字段筛选</button>`
-    +`<span class="hint">${list.length} 人</span>${hasFilter?`<button class="btn btn-sm" id="cfClear">清除</button>`:""}</div>`;
-  // 最近搜索词(点一下重搜);不重复显示当前正在搜的词
-  const recent=recentSearches().filter(t=>t!==(state.q||"").trim());
-  const recentRow=recent.length?`<div class="recentsearch" style="display:flex;gap:.3rem;flex-wrap:wrap;align-items:center;margin:-.15rem 0 .5rem"><span class="hint">最近搜索:</span>${recent.map(t=>`<button class="btn btn-sm rs-chip" data-q="${esc(t)}">${esc(t)}</button>`).join("")}<button class="btn btn-sm rs-clear" title="清空搜索历史">🗑 清空</button></div>`:"";
   const thead="<tr>"+orderedCols.map(c=>`<th data-sk="${c.k}">${esc(c.label)}${sk===c.k?(dir>0?" ▲":" ▼"):""}</th>`).join("")+"</tr>";
   const rows=list.map(p=>`<tr data-pid="${esc(p.id)}">`+orderedCols.map(c=>`<td>${esc(String(cellVal(p,c.k)))}</td>`).join("")+`</tr>`).join("");
-  box.innerHTML=bar+filterRow+recentRow+`<div class="rostertable"><table class="roster"><thead>${thead}</thead><tbody>${rows||""}</tbody></table></div>`;
+  box.innerHTML=bar+`<div class="rostertable"><table class="roster"><thead>${thead}</thead><tbody>${rows||""}</tbody></table></div>`;
   const dt=box.querySelector(".colpick"); if(dt) dt.ontoggle=e=>{ _colpickOpen=e.target.open; };
   box.querySelectorAll(".colpick input[type=checkbox]").forEach(cb=>cb.onchange=()=>{
     const cur=new Set(rosterCols()); cb.checked?cur.add(cb.dataset.col):cur.delete(cb.dataset.col);
-    localStorage.setItem("roster_cols", JSON.stringify(ROSTER_COLS.filter(c=>cur.has(c.k)).map(c=>c.k))); renderRoster(); });
-  const refocus=sel=>{ const e2=document.querySelector(sel); if(e2){ const v=e2.value; e2.focus(); try{e2.setSelectionRange(v.length,v.length);}catch(_){} } };
-  { const rs=$("#rosterSearch"); if(rs){
-      const apply=()=>{ state.q=rs.value; const top=$("#search"); if(top)top.value=rs.value; renderRoster(); refocus("#rosterSearch"); recordSearchDebounced(); };
-      rs.oninput=e=>{ if(e.isComposing) return; apply(); };          // 拼音组合中不重渲染(否则销毁输入框、打断输入法);提交后的非组合 input 才过滤
-      rs.oncompositionend=apply;                                     // 选词结束:用提交的中文过滤
-      rs.onkeydown=e=>{ if(e.key==="Enter"){ pushRecentSearch(rs.value); renderRoster(); refocus("#rosterSearch"); } }; } }
-  box.querySelectorAll(".rs-chip").forEach(b=>b.onclick=()=>{ state.q=b.dataset.q; const top=$("#search"); if(top)top.value=state.q; pushRecentSearch(state.q); renderRoster(); });
-  { const rc=box.querySelector(".rs-clear"); if(rc) rc.onclick=()=>{ clearRecentSearches(); renderRoster(); }; }
-  box.querySelectorAll(".cf-field").forEach(s=>s.onchange=()=>{ state.customFilters[+s.dataset.i].field=s.value; renderRoster(); });
-  box.querySelectorAll(".cf-op").forEach(s=>s.onchange=()=>{ state.customFilters[+s.dataset.i].op=s.value; renderRoster(); });
-  box.querySelectorAll(".cf-val").forEach(inp=>{ const apply=()=>{ const i=+inp.dataset.i; state.customFilters[i].val=inp.value; renderRoster(); refocus('.cf-val[data-i="'+i+'"]'); };
-    inp.oninput=e=>{ if(e.isComposing) return; apply(); }; inp.oncompositionend=apply; });   // 同样:拼音组合中不打断
-  box.querySelectorAll(".cf-del").forEach(b=>b.onclick=()=>{ state.customFilters.splice(+b.dataset.i,1); renderRoster(); });
-  { const a=$("#cfAdd"); if(a) a.onclick=()=>{ (state.customFilters=state.customFilters||[]).push({field:ROSTER_COLS[0].k,op:"contains",val:""}); renderRoster(); }; }
-  { const c=$("#cfClear"); if(c) c.onclick=()=>{ state.q=""; const top=$("#search"); if(top)top.value=""; state.customFilters=[]; renderRoster(); }; }
-  box.querySelectorAll("th[data-sk]").forEach(th=>th.onclick=()=>{ const k=th.dataset.sk; _rosterSort=(sk===k)?{k,dir:-dir}:{k,dir:1}; renderRoster(); });
+    localStorage.setItem("roster_cols", JSON.stringify(ROSTER_COLS.filter(c=>cur.has(c.k)).map(c=>c.k))); renderRoster(peopleFiltered()); });
+  box.querySelectorAll("th[data-sk]").forEach(th=>th.onclick=()=>{ const k=th.dataset.sk; _rosterSort=(sk===k)?{k,dir:-dir}:{k,dir:1}; renderRoster(peopleFiltered()); });
   box.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{ const p=byId(tr.dataset.pid); if(p) openDetail(p); });   // 点行看详情(含关系列表),编辑走详情里「编辑」
 }
 
@@ -1772,8 +1757,7 @@ function switchView(name){
   if(name==="log"){ renderBackup(); renderLog(); }
 }
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchView(t.dataset.view));
-$("#search").oninput=e=>{ state.q=e.target.value; renderPeople(); recordSearchDebounced(); };
-$("#search").onkeydown=e=>{ if(e.key==="Enter"){ pushRecentSearch($("#search").value); renderPeople(); } };
+// 顶栏搜索已并入名册视图内的共用筛选条(renderPeopleFilter);此处不再绑定
 $("#shareMode").onchange=e=>{ state.share=e.target.checked; renderPeople(); };
 $("#addBtn").onclick=()=>openEdit(null);
 $("#saveBtn").onclick=saveModal;
