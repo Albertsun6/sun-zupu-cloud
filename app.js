@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.26.2";
+const APP_VERSION = "v0.26.3";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1515,6 +1515,8 @@ async function cleanDraftsDates(drafts){
     const lm=lunarLeapAmbiguous(raw); if(lm) d._leapWarn=`农历${lm}月落在闰${lm}月之年,已按正${lm}月算→${d.birth};若实为闰月,用万年历勾「闰月」改`;
     d._dateWarn = dateConflictNote(raw, mp[raw]);   // DeepSeek 与 GLM 判断不一致→提示
   });
+  const vals=Object.values(mp);
+  return { ai:vals.length, dual:vals.filter(r=>r&&r._glm).length, conflicts:vals.filter(r=>r&&r._conflict).length };   // 供 UI 显示"双验证 N 条"
 }
 function openAI(){ $("#aiText").value=""; $("#aiMsg").textContent=""; $("#aiDrafts").innerHTML=""; $("#aiCreateBar").style.display="none"; _aiDrafts=[]; $("#aiMask").classList.add("open"); }
 async function aiParse(){
@@ -1528,8 +1530,9 @@ async function aiParse(){
     if(!r.ok){ msg.textContent="失败:"+(data.error||r.status); return; }
     _aiDrafts=(data.persons||[]).map(p=>{ const d={}; AI_DRAFT_FIELDS.forEach(f=>d[f.k]=p[f.k]!=null?String(p[f.k]):""); if(!d.father_note&&p.father) d.father_note="父:"+p.father; return d; });
     msg.textContent=`识别到 ${_aiDrafts.length} 人,正用万年历换算日期/时辰…`;
-    await cleanDraftsDates(_aiDrafts);   // 当场拆 公历/农历(属相)/时辰,所见即所得(不必等创建)
-    msg.textContent=`识别到 ${_aiDrafts.length} 人,日期已按万年历换算,请核对补齐后创建`;
+    const st=await cleanDraftsDates(_aiDrafts);   // 当场拆 公历/农历(属相)/时辰,所见即所得(不必等创建)
+    const dualNote = st&&st.dual ? `,DeepSeek+GLM 双验证 ${st.dual} 条日期${st.conflicts?(`,${st.conflicts} 条两模型不一致已标红`):`(均一致)`}` : (st&&st.ai?`(GLM 未参与——检查 GLM_API_KEY)`:``);
+    msg.textContent=`识别到 ${_aiDrafts.length} 人,日期已按万年历换算${dualNote},请核对补齐后创建`;
     renderAIDrafts();
   }catch(e){ msg.textContent="网络/服务错误:"+e.message; }
   finally{ $("#aiParse").disabled=false; }
