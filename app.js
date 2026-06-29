@@ -35,8 +35,8 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.30.0";
-const APP_DATE = "2026-06-29";
+const APP_VERSION = "v0.31.0";
+const APP_DATE = "2026-06-30";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
 // L1 节点=纯个人属性。世代(派生)/本族外部/行第/亲属关系/母/父系说明/配偶 已退出表单(关系→边层,世代→推算)。
@@ -1169,8 +1169,10 @@ async function reconcileFatherEdge(childId, newFatherId){
   newFatherId=(newFatherId||"").trim();
   const cur=state.fatherOf[childId]||"";
   if(newFatherId===cur || newFatherId===childId) return;
-  if(cur){ try{ const edges=await window.REL.of(childId); const old=edges.find(r=>r.type==="father"&&r.to_id===childId); if(old) await window.REL.del(old.id); }catch(e){} }
-  if(newFatherId){ try{ await window.REL.add({from_id:newFatherId,to_id:childId,type:"father"}); }catch(e){} }
+  try{   // 不再静默吞错:删旧父边(已存 before 可撤销)+ 建新父边,任一失败都冒泡给 saveModal 显示,避免"删了旧的、新的没建上"静默丢父子关系
+    if(cur){ const edges=await window.REL.of(childId); const old=edges.find(r=>r.type==="father"&&r.to_id===childId); if(old) await window.REL.del(old.id); }
+    if(newFatherId){ await window.REL.add({from_id:newFatherId,to_id:childId,type:"father"}); }
+  }catch(e){ throw new Error("父子关系更新失败("+(e.message||e)+");其余字段已保存,可重试或到详情页改父亲"); }
 }
 async function saveModal(){
   const d=collectForm(); const fsel=$("#f_father_id").value;
@@ -1540,19 +1542,23 @@ async function runImport(){
   const mask=$("#importMask"), P=_imp.preview, btn=$("#impRun"); btn.disabled=true; btn.textContent="导入中…";
   let created=0,merged=0,over=0,skipped=0; const fails=[];
   const clean=inc=>{ const o={}; Object.keys(inc).forEach(k=>{ const v=(inc[k]||"").trim(); if(v) o[k]=v; }); return o; };
-  for(const x of P){
-    try{
-      if(x.target==="__skip__"){ skipped++; continue; }   // 用户选了忽略=完全不导入这行
-      if(x.target==="__new__"){ if(!x.nm) continue; await api("POST","/api/persons",{ ...clean(x.inc), status:(x.inc.status||"待考") }); created++; }
-      else { const ex=byId(x.target); if(!ex){ fails.push(x.nm+":匹配对象不存在"); continue; }
-        if(ex.deleted){ fails.push(x.nm+":目标已在回收站,已跳过"); continue; }   // 防 stale 缓存/并发把回收站里的人改了
-        if(x.strategy==="skip"){ skipped++; continue; }
-        const patch={}; Object.keys(x.inc).forEach(k=>{ const v=(x.inc[k]||"").trim(); if(!v) return;
-          if(x.strategy==="merge"){ if(!((ex[k]||"").trim())) patch[k]=v; } else patch[k]=v; });
-        if(Object.keys(patch).length){ await api("PUT","/api/persons/"+encodeURIComponent(x.target),patch); if(x.strategy==="merge")merged++; else over++; } else skipped++;
-      }
-    }catch(e){ fails.push((x.nm||"?")+":"+e.message); }
-  }
+  // 止血①:本批新建的行一次性预分配 ID,消灭 createPerson 内逐行 nextId 全表扫(原 O(N^2) → O(1) 一次取号)
+  const newRows=P.filter(x=>x.target==="__new__"&&x.nm);
+  try{ if(newRows.length){ const ids=await window.allocIds(newRows.length); newRows.forEach((x,k)=>{ if(ids[k]) x._allocId=ids[k]; }); } }catch(e){ /* 取号失败→回退逐行 nextId(见下并发降级) */ }
+  const allNewHaveIds = newRows.every(x=>x._allocId);
+  const doRow=async(x)=>{
+    if(x.target==="__skip__"){ skipped++; return; }   // 忽略=完全不导入
+    if(x.target==="__new__"){ if(!x.nm) return; const body={ ...clean(x.inc), status:(x.inc.status||"待考") }; if(x._allocId) body.id=x._allocId; await api("POST","/api/persons",body); created++; return; }
+    const ex=byId(x.target); if(!ex){ fails.push(x.nm+":匹配对象不存在"); return; }
+    if(ex.deleted){ fails.push(x.nm+":目标已在回收站,已跳过"); return; }   // 防 stale/并发改回收站
+    if(x.strategy==="skip"){ skipped++; return; }
+    const patch={}; Object.keys(x.inc).forEach(k=>{ const v=(x.inc[k]||"").trim(); if(!v) return;
+      if(x.strategy==="merge"){ if(!((ex[k]||"").trim())) patch[k]=v; } else patch[k]=v; });   // merge 只补空、绝不用空值抹已有
+    if(Object.keys(patch).length){ await api("PUT","/api/persons/"+encodeURIComponent(x.target),patch); if(x.strategy==="merge")merged++; else over++; } else skipped++;
+  };
+  // 止血②:有上限的并发池(墙钟≈总往返/并发度)。预分配 ID 成功才并发;失败则降级串行,保留原 nextId 串行不撞号的安全性。
+  const LIMIT = allNewHaveIds ? 8 : 1; let i=0;
+  await Promise.all(Array.from({length:Math.min(LIMIT,P.length||1)}, async()=>{ while(i<P.length){ const x=P[i++]; try{ await doRow(x); }catch(e){ fails.push((x.nm||"?")+":"+(e.message||e)); } } }));
   mask.classList.remove("open"); await reloadPersons(); await refreshRelCount(); renderHeader(); renderPeople(); renderHealth();
   alert(`导入完成:新建 ${created} · 合并 ${merged} · 覆盖 ${over} · 跳过 ${skipped}`+(fails.length?`\n失败 ${fails.length}:\n`+fails.slice(0,12).join("\n"):"")+"\n(均可在操作历史撤销)");
 }

@@ -42,6 +42,13 @@ window.photoUrl = (key) => key ? sb.storage.from(BUCKET).getPublicUrl(key).data.
 function nowStr(){ const d=new Date(), p=n=>String(n).padStart(2,"0");
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
 function must(res){ if(res.error) throw new Error(res.error.message||String(res.error)); return res.data; }
+// 分页全取:PostgREST 单请求默认上限 1000 行,超过会【静默截断】(不报错,只返回前 1000)。
+// 循环 range 直到取完;<1000 行时只跑一次,零行为变化。全量读(persons/relationships/marriages/media)走它,防越过 1000 人后悄悄丢数据。
+async function selectAll(table, build){
+  const PAGE=1000; let from=0; const out=[];
+  for(;;){ let q=sb.from(table).select("*"); if(build) q=build(q); const rows=must(await q.range(from,from+PAGE-1)); out.push(...rows); if(rows.length<PAGE) break; from+=PAGE; }
+  return out;
+}
 async function logHist(action, entity, entity_id, summary, before, after){
   try{ await sb.from("history").insert({ ts:nowStr(), action, entity, entity_id:String(entity_id),
     summary: summary||"", before: before!=null?JSON.stringify(before):"", after: after!=null?JSON.stringify(after):"", undone:0 }); }
@@ -58,15 +65,25 @@ const EXT = { "image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gi
 
 // ---------- persons ----------
 async function listPersons(onlyDeleted){
-  let q = sb.from("persons").select("*").order("sort_order").order("id");
-  q = onlyDeleted ? q.eq("deleted",1) : q.eq("deleted",0);
-  return must(await q);
+  return selectAll("persons", q=>{ q=q.order("sort_order").order("id"); return onlyDeleted ? q.eq("deleted",1) : q.eq("deleted",0); });
+}
+// 全量(在世 + 回收站):导出/备份用,避免误把 listPersons(true)=仅回收站当成"全部"
+async function listAllPersons(){
+  return selectAll("persons", q=>q.order("sort_order").order("id"));
 }
 async function nextId(){
   const rows = must(await sb.from("persons").select("id"));
   let mx=0; rows.forEach(r=>{ const m=/^[A-Za-z](\d+)/.exec(r.id||""); if(m) mx=Math.max(mx,+m[1]); });
   return "S"+String(mx+1).padStart(3,"0");
 }
+// 批量导入用:一次扫全表算出连续 n 个新 ID(替代逐行 nextId 的 O(N^2) 全表扫)。
+// 注意:仍非并发原子(多 editor 同时导入可能撞号);createPerson 的存在性查 + 主键约束兜底为 fail-loud(报错不脏写)。根治见 import_persons RPC(Wave 1)。
+async function allocIds(n){
+  const rows = must(await sb.from("persons").select("id"));
+  let mx=0; rows.forEach(r=>{ const m=/^[A-Za-z](\d+)/.exec(r.id||""); if(m) mx=Math.max(mx,+m[1]); });
+  const out=[]; for(let i=1;i<=n;i++) out.push("S"+String(mx+i).padStart(3,"0")); return out;
+}
+window.allocIds = allocIds;
 async function getPerson(pid){ return must(await sb.from("persons").select("*").eq("id",pid).maybeSingle()); }
 async function createPerson(body){
   const pid = (body.id||"").trim() || await nextId();
@@ -197,7 +214,7 @@ async function listTranscription(){ return must(await sb.from("transcription").s
 async function listHistory(){ return must(await sb.from("history").select("*").order("id",{ascending:false}).limit(300)); }
 
 // ---------- 撤销 ----------
-const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media","create:relationship"]);
+const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media","create:relationship","delete:relationship"]);
 async function undo(hid){
   const h = must(await sb.from("history").select("*").eq("id",hid).maybeSingle());
   if(!h) throw new Error("记录不存在");
@@ -213,6 +230,7 @@ async function undo(hid){
   else if(key==="delete:marriage"){ if(before) await reinsertMarriage(before); summ="撤销删除婚姻"; }
   else if(key==="delete:media"){ if(before) await reinsertMedia(before); summ="撤销删除照片"; }
   else if(key==="create:relationship"){ must(await sb.from("relationships").delete().eq("id",Number(h.entity_id))); summ="撤销新增关系: "+h.entity_id; }   // 机器/手工建的边一键撤;entity_id 存为字符串,转回数字匹配数值主键(同 delRelationship 的已验证写法)
+  else if(key==="delete:relationship"){ if(before) await reinsertRelationship(before); summ="撤销删除关系 → 重建: "+((before&&before.type)||"")+" "+((before&&before.from_id)||"")+"→"+((before&&before.to_id)||""); }   // 删边可撤(改父亲撤销后旧父边能回来)
   must(await sb.from("history").update({ undone:1 }).eq("id",hid));
   await logHist("undo",h.entity,h.entity_id,summ);
   return { ok:true, summary:summ };
@@ -225,7 +243,7 @@ async function listRelTypes(){
   _relTypesCache = must(await sb.from("relationship_types").select("*").order("sort_order").order("type"));
   return _relTypesCache;
 }
-async function listRelationships(){ return must(await sb.from("relationships").select("*").order("id")); }
+async function listRelationships(){ return selectAll("relationships", q=>q.order("id")); }
 async function relationsOf(pid){ return must(await sb.from("relationships").select("*").or("from_id.eq."+pid+",to_id.eq."+pid)); }
 async function addRelationship(body){
   let from_id=body.from_id, to_id=body.to_id;
@@ -245,8 +263,13 @@ async function updateRelationship(id, body){
   await logHist("update","relationship",id,"修改关系"); return row;
 }
 async function delRelationship(id){
+  const row = must(await sb.from("relationships").select("*").eq("id",id).maybeSingle());   // 存 before,删边方可撤销(改父亲=删旧边+加新边,旧边能还原)
   must(await sb.from("relationships").delete().eq("id",id));
-  await logHist("delete","relationship",id,"删除关系"); return { ok:true };
+  await logHist("delete","relationship",id,"删除关系", row, null); return { ok:true };
+}
+async function reinsertRelationship(row){
+  const rec={}; ["from_id","to_id","type","directed","start_date","end_date","note"].forEach(k=>{ if(k in row) rec[k]=row[k]; });
+  must(await sb.from("relationships").insert(rec));
 }
 window.REL = { types:listRelTypes, all:listRelationships, of:relationsOf, add:addRelationship, update:updateRelationship, del:delRelationship };
 
@@ -362,14 +385,14 @@ const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"
 
 async function fullData(redact){
   const [persons, narratives, verify, transcription, meta] = await Promise.all([
-    listPersons(true), listNarratives(), listVerify(), listTranscription(), getMeta()]);
-  const allMarr = must(await sb.from("marriages").select("*").order("sort_order").order("id"));
-  const allMedia = must(await sb.from("media").select("*").order("is_primary",{ascending:false}).order("sort_order").order("id"));
+    listAllPersons(), listNarratives(), listVerify(), listTranscription(), getMeta()]);
+  const allMarr = await selectAll("marriages", q=>q.order("sort_order").order("id"));
+  const allMedia = await selectAll("media", q=>q.order("is_primary",{ascending:false}).order("sort_order").order("id"));
   const mByP={}, mdByP={};
   allMarr.forEach(m=>(mByP[m.person_id]=mByP[m.person_id]||[]).push(m));
   allMedia.forEach(m=>(mdByP[m.person_id]=mdByP[m.person_id]||[]).push(m));
   persons.forEach(p=>{ if(redact){p.contact="";p.address="";} p.marriages=mByP[p.id]||[]; p.media=mdByP[p.id]||[]; });
-  const relationships = must(await sb.from("relationships").select("*").order("id"));
+  const relationships = await selectAll("relationships", q=>q.order("id"));
   const relationship_types = must(await sb.from("relationship_types").select("*").order("sort_order"));
   return { meta, persons, narratives, verify, transcription, relationships, relationship_types, _redacted:!!redact };
 }
@@ -390,6 +413,8 @@ function buildGenOf(persons, relationships){
     memo[id]=null; return null; };
   return id=>walk(id,new Set());
 }
+// 父子结构的单一真源 = relationships 的 father 边(persons.father_id 已退役,不再读)
+function fatherMapOf(relationships){ const m={}; (relationships||[]).forEach(r=>{ if(r.type==="father") m[r.to_id]=r.from_id; }); return m; }
 async function exportJson(redact){ const d=await fullData(redact); download(redact?"zupu-share.json":"zupu-backup.json", JSON.stringify(d,null,2), "application/json"); }
 async function exportCsv(redact){
   const d=await fullData(redact); const genOf=buildGenOf(d.persons, d.relationships);
@@ -400,7 +425,8 @@ async function exportCsv(redact){
 async function exportGedcom(){
   const d=await fullData(false); const rows=d.persons.filter(p=>!p.deleted); const by={}; rows.forEach(r=>by[r.id]=r);
   const xref={}; rows.forEach((r,i)=>xref[r.id]="@I"+(i+1)+"@");
-  const fams={}; rows.forEach(r=>{ const f=r.father_id; if(f&&by[f]) (fams[f]=fams[f]||[]).push(r.id); });
+  const fatherOf=fatherMapOf(d.relationships);
+  const fams={}; rows.forEach(r=>{ const f=fatherOf[r.id]; if(f&&by[f]) (fams[f]=fams[f]||[]).push(r.id); });
   const fx={}; Object.keys(fams).forEach((f,i)=>fx[f]="@F"+(i+1)+"@"); const foc={}; Object.entries(fams).forEach(([f,ks])=>ks.forEach(k=>foc[k]=f));
   const L=["0 HEAD","1 SOUR 关系图谱(人物关系图谱)","1 GEDC","2 VERS 5.5.1","2 FORM LINEAGE-LINKED","1 CHAR UTF-8"];
   rows.forEach(r=>{ const pid=r.id; L.push("0 "+xref[pid]+" INDI");
@@ -429,10 +455,11 @@ async function exportShareHtml(){
     groups[g].forEach(p=>{ if(living(p)) gen+='<p><b>'+esc(p.name||"(无名)")+'</b> <span class="tag">在世</span></p>';
       else { const bits=[p.alias&&"字 "+p.alias, yrs(p), p.residence, p.occupation, marrSummary(p.marriages)&&"婚: "+marrSummary(p.marriages), p.deeds].filter(Boolean); gen+='<p><b>'+esc(p.name||"(无名)")+'</b> '+esc(bits.join(" · "))+'</p>'; } });
     gen+='</div>'; });
-  const ids=new Set(persons.map(p=>p.id)); const isF=new Set(persons.map(p=>p.father_id).filter(x=>ids.has(x)));
-  const nodes=persons.filter(p=>ids.has(p.father_id)||isF.has(p.id));
+  const fatherOf=fatherMapOf(d.relationships);
+  const ids=new Set(persons.map(p=>p.id)); const isF=new Set(persons.map(p=>fatherOf[p.id]).filter(x=>ids.has(x)));
+  const nodes=persons.filter(p=>ids.has(fatherOf[p.id])||isF.has(p.id));
   let tdef="graph TD\n"; nodes.forEach(p=>{ let lab=p.name||"(无名)"; if(!living(p)){ const y=[p.birth,p.death].filter(x=>x&&x!=="无考").join("-"); if(y)lab+="·"+y; } tdef+="  "+p.id+'["'+lab.replace(/["\[\]]/g,"")+'"]\n'; });
-  nodes.forEach(p=>{ if(ids.has(p.father_id)) tdef+="  "+p.father_id+" --> "+p.id+"\n"; });
+  nodes.forEach(p=>{ const f=fatherOf[p.id]; if(ids.has(f)) tdef+="  "+f+" --> "+p.id+"\n"; });
   const narHtml=nar.map(n=>'<div class="card"><h3>'+esc(n.title||n.key)+'</h3><p>'+esc(n.text)+'</p></div>').join("");
   const cg=(meta.charGen||[]).join(" · "); const today=nowStr().slice(0,10);
   const htmlDoc='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(meta.title||"族谱")+' · 分享版</title>'
