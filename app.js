@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.29.0";
+const APP_VERSION = "v0.29.1";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -192,16 +192,22 @@ function openBulkRel(list){
   if(!symTypes.length){ alert("没有可用的对称关系类型(同事/朋友等)"); return; }
   let mask=$("#bulkRelMask"); if(!mask){ mask=el("div","mask"); mask.id="bulkRelMask"; document.body.appendChild(mask); }
   const typeOpts=symTypes.map(t=>`<option value="${esc(t.type)}"${t.type==="colleague"?" selected":""}>${esc(t.label_zh)}</option>`).join("");
+  // 中心人物的下拉【默认就是这组筛选出来的人】(中心通常在组内,如 孙德峰∈银河,一点即选);搜索框可搜全部人(中心不在组里时)
+  const groupOpts=list.slice().sort((a,b)=>(parseInt(a.gen)||0)-(parseInt(b.gen)||0)||(a.sort_order||0)-(b.sort_order||0))
+    .map(p=>`<option value="${esc(p.id)}">${esc(p.name||"(无名)")}${p.birth?(" · "+esc(p.birth)):""} — ${esc(p.id)}</option>`).join("");
+  const groupPH=`<option value="">— 从这 ${list.length} 人里选中心(或右边搜全部)—</option>`;
   mask.innerHTML=`<div class="modal" style="width:min(560px,100%)"><h2>批量加关系</h2>
-    <p class="hint">把<b>当前筛选出的 ${list.length} 人</b>,全部加为某人的某种(对称)关系。已存在的自动跳过;每条都留痕、可在操作历史逐条撤销。</p>
-    <div class="field"><label>目标人物(和这些人互相建立关系的那个人)</label><div class="inwrap"><input id="brSearch" placeholder="🔍 筛选姓名/字号/ID" style="width:10em;margin-right:.3rem"><select id="brTarget"><option value="">— 选目标人物 —</option>${_personOptsBirth("","")}</select></div></div>
+    <p class="hint">把<b>这 ${list.length} 人</b>全部连到<b>一个中心人物</b>(对称关系,如同事/朋友)。中心通常就在这组里——比如孙德峰就在银河,直接在下拉里选他。已存在的自动跳过;每条留痕、可在操作历史撤销。</p>
+    <div class="field"><label>中心人物(这组人都连到 TA)</label><div class="inwrap"><input id="brSearch" placeholder="🔍 不在这组?搜全部" style="width:10em;margin-right:.3rem"><select id="brTarget">${groupPH}${groupOpts}</select></div></div>
     <div class="field"><label>关系类型</label><select id="brType">${typeOpts}</select> &nbsp; 备注 <input id="brNote" placeholder="可空,如 银河同事" style="width:11em"></div>
     <div class="err" id="brMsg"></div>
     <div class="modal-foot"><span class="spacer"></span><button class="btn" id="brCancel">取消</button><button class="btn btn-primary" id="brRun">确认创建</button></div></div>`;
   mask.classList.add("open");
   $("#brCancel").onclick=()=>mask.classList.remove("open");
   mask.onclick=e=>{ if(e.target===mask) mask.classList.remove("open"); };
-  { const se=$("#brSearch"); if(se) se.oninput=()=>{ const cur=$("#brTarget").value; $("#brTarget").innerHTML=`<option value="">— 选目标人物 —</option>`+_personOptsBirth(cur, se.value); }; }
+  { const se=$("#brSearch"); if(se){ se.oninput=()=>{ const cur=$("#brTarget").value, q=se.value.trim();
+      $("#brTarget").innerHTML = q ? (`<option value="">— 选中心人物 —</option>`+_personOptsBirth(cur, q)) : (groupPH+groupOpts); };   // 没输入=回到这组;输入=搜全部
+      setTimeout(()=>{ try{ se.focus(); }catch(_){} }, 60); } }
   $("#brRun").onclick=async()=>{
     const target=$("#brTarget").value, type=$("#brType").value, note=$("#brNote").value.trim(), msg=$("#brMsg");
     if(!target){ msg.textContent="请先选目标人物"; return; }
