@@ -49,7 +49,7 @@ export async function onRequestPost({ request, env }){
           method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+key },
           body: JSON.stringify({ model, stream:false, temperature:0, response_format:{ type:"json_object" }, messages }), signal:ctrl.signal,
         });
-        if(!dres.ok){ const tx=await dres.text(); throw new Error("GLM 调用失败 ("+dres.status+"): "+tx.slice(0,300)); }
+        if(!dres.ok){ await dres.text().catch(()=>""); throw new Error("GLM 服务返回错误状态 "+dres.status); }   // 不回传 GLM 响应体(可能含敏感信息)给客户端
         const data = await dres.json();
         return (data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||"";
       } finally { clearTimeout(t); }

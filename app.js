@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.26.0";
+const APP_VERSION = "v0.26.1";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -1414,10 +1414,11 @@ async function buildPreviewFromIncoming(incList){
     if(needsAIDate(raw) || (parseDateParts(raw).is_lunar && parseDateParts(raw).year)) aiNeed.add(raw); });   // 农历/年号送双AI验证
   const mp={}; if(aiNeed.size){ try{ (await aiNormalizeDatesDual([...aiNeed])).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
   const messy = s => !(s||"").trim() || /\d{4}|时|分/.test(s);   // 空 或 含年/时=未拆原串,可被万年历清洗版覆盖
-  list.forEach(inc=>{ if(!inc._braw) return; const rd=resolveDate(mp[inc._braw], inc._braw);
-    if(rd.birth) inc.birth=rd.birth; else inc.birth=inc._braw;                       // 公历(认不出保留原文)
+  list.forEach(inc=>{ if(!inc._braw) return; const raw=inc._braw; const rd=resolveDate(mp[raw], raw);
+    if(rd.birth) inc.birth=rd.birth; else inc.birth=raw;                             // 公历(认不出保留原文)
     if(rd.birth_lunar && messy(inc.birth_lunar)) inc.birth_lunar=rd.birth_lunar;      // 农历(双向补齐)
     if(rd.birth_time  && messy(inc.birth_time))  inc.birth_time =rd.birth_time;       // 时辰
+    inc._dateWarn = dateConflictNote(raw, mp[raw]);                                   // 两模型不一致→预览标红
     delete inc._braw; });
   _imp.preview = list.map(matchIncoming);
 }
@@ -1430,6 +1431,7 @@ function renderImportPreview(){
   const newCount=P.filter(x=>x.target==="__new__").length;
   const rows=P.map((x,i)=>{
     const sum=[x.inc.name,x.inc.sex,x.inc.birth,x.inc.birth_time&&("🕐"+x.inc.birth_time),x.inc.birth_lunar&&("农历:"+x.inc.birth_lunar),x.inc.company].filter(Boolean).join(" · ");
+    const dwarn=x.inc._dateWarn?` <span class="hint" style="color:#dc2626;font-weight:600">⚠ ${esc(x.inc._dateWarn)}</span>`:"";
     const opts=`<option value="__new__"${x.target==="__new__"?" selected":""}>➕ 新建</option>`+(x.options||[]).map(p=>`<option value="${esc(p.id)}"${x.target===p.id?" selected":""}>${esc(p.name)}·${esc(p.birth||"无生年")}·${esc(p.id)}</option>`).join("");
     const strat = x.target==="__new__" ? `<span class="hint">新建</span>` : `<select class="imp-strat" data-i="${i}"><option value="merge"${x.strategy==="merge"?" selected":""}>合并·填空</option><option value="overwrite"${x.strategy==="overwrite"?" selected":""}>覆盖</option><option value="skip"${x.strategy==="skip"?" selected":""}>跳过</option></select>`;
     const warn = x.target==="__new__" ? ''
@@ -1437,7 +1439,7 @@ function renderImportPreview(){
         : (x.yearConflict ? ` <span class="hint" style="color:#dc2626;font-weight:600">⚠ 生年不一致(现有 ${esc(((byId(x.target)||{}).birth)||"?")}),可能非同一人,请核对</span>`
           : (!x.byYear ? ' <span class="hint" style="color:#b45309">按姓名匹配(现有缺生年),可填补</span>'
             : ' <span class="hint" style="color:#15803d">✓ 姓名+生年命中</span>')));
-    return `<tr><td>${esc(sum)}${warn}</td><td><select class="imp-match" data-i="${i}">${opts}</select></td><td>${strat}</td></tr>`;
+    return `<tr><td>${esc(sum)}${dwarn}${warn}</td><td><select class="imp-match" data-i="${i}">${opts}</select></td><td>${strat}</td></tr>`;
   }).join("");
   mask.innerHTML=`<div class="modal" style="width:min(840px,100%)"><h2>匹配预览(${P.length} 行 · 新建 ${newCount}${_imp.skippedNoName?(" · 空名跳过 "+_imp.skippedNoName):""})</h2>
     <p class="hint">左=导入数据,中=匹配到谁(可改/选新建),右=命中现有时怎么处理。<b>合并·填空</b>只补空字段(不动已有);<b>覆盖</b>用导入值覆盖;<b>跳过</b>不动。</p>
