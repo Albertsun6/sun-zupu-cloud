@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.21.1";
+const APP_VERSION = "v0.21.2";
 const APP_DATE = "2026-06-29";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -929,18 +929,30 @@ async function aiNormalizeDates(list){
 }
 const _SHICHEN12=["子","丑","寅","卯","辰","巳","午","未","申","酉","戌","亥"];
 const _shichenOf = h => (window.LUNARCONV&&window.LUNARCONV.shichenOf)?window.LUNARCONV.shichenOf(h):(_SHICHEN12[Math.floor(((h+1)%24)/2)]+"时");
-// 从任意中文/数字串抽出生时间 → "H:MM 时辰";抽不到返回 ""。纯客户端规则,稳健,不依赖 AI 的格式。
+// 从任意中文/数字串抽出生时间 → "H:MM 时辰" 或 "X时";抽不到返回 ""。纯客户端规则(阿拉伯+中文数字+时辰名+早晚上下午/半夜判时段),不依赖 AI 格式。
+const _CNNUM={零:0,"〇":0,一:1,二:2,两:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};
+function _cnNum(s){ s=String(s||"").trim(); if(!s)return null; if(/^\d+$/.test(s))return +s;
+  if(s==="十")return 10; if(s==="廿"||s==="卄")return 20; if(s==="卅")return 30; let m;
+  if((m=s.match(/^十([一二两三四五六七八九])$/)))return 10+_CNNUM[m[1]];
+  if((m=s.match(/^([一二两三四五六七八九])十([一二两三四五六七八九])?$/)))return _CNNUM[m[1]]*10+(m[2]?_CNNUM[m[2]]:0);
+  if((m=s.match(/^廿([一二两三四五六七八九])$/)))return 20+_CNNUM[m[1]];
+  if((m=s.match(/^[零〇]([一二两三四五六七八九])$/)))return _CNNUM[m[1]];
+  if(s.length===1&&_CNNUM[s]!=null)return _CNNUM[s]; return null; }
+const _PERIODRE="凌晨|清晨|早晨|一早|大早|早上|上午|中午|晌午|下午|傍晚|黄昏|晚上|半夜|子夜|夜里|夜间|晌|早|晚|夜";
+function _applyPeriod(h,pd){ pd=pd||"";
+  if(/半夜|子夜|凌晨/.test(pd)) return h===12?0:((h%24)+24)%24;                          // 半夜/子夜/凌晨:12→0,其余AM
+  if(/下午|傍晚|黄昏|晚上|晚/.test(pd)) return (h>=1&&h<=11)?h+12:((h%24)+24)%24;          // 下午/晚:1-11 +12
+  if(/夜里|夜间|夜/.test(pd)) return (h>=1&&h<=5)?h:(h>=6&&h<=11?h+12:((h%24)+24)%24);     // 夜里:1-5 AM、6-11 PM
+  return ((h%24)+24)%24; }
 function extractTime(raw){
   const s=String(raw||""); if(!s) return "";
-  const m=s.match(/(凌晨|清晨|早晨|一早|大早|早上|早|上午|中午|晌午|晌|下午|傍晚|黄昏|晚上|晚|夜里|夜间|半夜|子夜|夜)?\s*(\d{1,2})\s*[:：时點点]\s*(半|[0-5]?\d)?\s*分?/);
-  if(m && +m[2]<=23){
-    let h=+m[2], min=0; if(m[3]==="半") min=30; else if(m[3]) min=Math.min(59,+m[3]);
-    const pd=m[1]||"";
-    if(/下午|傍晚|黄昏|晚|夜/.test(pd) && h>=1 && h<=11) h+=12;            // 下午/晚 1–11 → +12
-    else if(/凌晨|清晨|早晨|半夜|子夜|早|上午/.test(pd) && h===12) h=0;    // 凌晨/上午 12 点 → 0
-    h=((h%24)+24)%24;
-    return `${h}:${String(min).padStart(2,"0")} ${_shichenOf(h)}`;
-  }
+  let m=s.match(new RegExp(`(${_PERIODRE})?\\s*(\\d{1,2})\\s*[:：时點点]\\s*(半|[0-5]?\\d)?\\s*分?`));   // 阿拉伯数字钟点
+  if(m && +m[2]<=23){ let h=+m[2],min=0; if(m[3]==="半")min=30; else if(m[3])min=Math.min(59,+m[3]); h=_applyPeriod(h,m[1]);
+    return `${h}:${String(min).padStart(2,"0")} ${_shichenOf(h)}`; }
+  m=s.match(new RegExp(`(${_PERIODRE})?\\s*([零〇一二两三四五六七八九十廿卄卅]{1,3})\\s*[点時时]\\s*(半|[零〇一二两三四五六七八九十]{1,3}\\s*分|[一二三四]\\s*刻|[0-5]?\\d\\s*分)?`));   // 中文数字钟点
+  if(m){ const hh=_cnNum(m[2]); if(hh!=null&&hh<=23){ let h=hh,min=0; const mm=m[3]||"";
+    if(mm==="半")min=30; else if(/刻/.test(mm)){const k=_cnNum(mm.replace(/刻/,""));min=(k||0)*15;} else if(/分/.test(mm)){const x=_cnNum(mm.replace(/分/,""));if(x!=null)min=Math.min(59,x);}
+    h=_applyPeriod(h,m[1]); return `${h}:${String(min).padStart(2,"0")} ${_shichenOf(h)}`; } }
   const sc=s.match(/([子丑寅卯辰巳午未申酉戌亥])时/); if(sc) return sc[1]+"时";   // 时辰名
   return "";
 }
