@@ -293,41 +293,40 @@ table.roster tbody tr:hover{background:#ecfdf5}
 .initrel{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;font-size:.85rem;color:#334155}
 .initrel select{padding:.3rem;border:1px solid var(--line);border-radius:6px;font-size:.85rem}
 
-/* ============ 传统谱图(tree-classic.js)============ */
-.ct-controls{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.2rem 0 .6rem;font-size:.85rem;color:#334155}
-.ct-controls select{padding:.25rem .4rem;border:1px solid var(--line);border-radius:6px;font-size:.85rem}
+/* ============ 传统谱图(tree-classic.js)· 竖排紧凑 ============ */
+.ct-controls{display:flex;gap:.55rem;align-items:center;flex-wrap:wrap;margin:.1rem 0 .45rem;font-size:.84rem;color:#334155}
+.ct-controls select{padding:.22rem .4rem;border:1px solid var(--line);border-radius:6px;font-size:.84rem}
 .ct-zoom{display:inline-flex;gap:.25rem;align-items:center}
 .ct-zoom #ctZoomVal{min-width:3em;text-align:center;color:#475569}
-.ct-head{text-align:center;margin:.2rem 0 .8rem;border-bottom:1px solid var(--line);padding-bottom:.5rem}
-.ct-title{font-size:1.15rem;font-weight:700;color:#0f172a;letter-spacing:.06em}
-.ct-sub{font-size:.78rem;color:#64748b;margin-top:.2rem}
-.ct-counts{font-size:.75rem;color:#94a3b8;margin-top:.2rem}
-.ct-scroll{overflow:auto;border:1px solid var(--line);border-radius:var(--r-md);background:#fcfdff;
-  background-image:linear-gradient(#f1f5f9 1px,transparent 1px);background-size:100% 24px}
-.ct-canvas{position:relative}
+.ct-head{display:flex;align-items:baseline;gap:.6rem;margin:.1rem 0 .4rem;padding-bottom:.3rem;border-bottom:1px solid var(--line)}
+.ct-title{font-size:1.05rem;font-weight:700;color:#0f172a;letter-spacing:.05em}
+.ct-counts{font-size:.74rem;color:#94a3b8}
+.ct-scroll{overflow:auto;border:1px solid var(--line);border-radius:var(--r-md);background:#fcfdff;padding:2px}
+.ct-wrap{position:relative}
+.ct-canvas{position:relative;transform-origin:0 0}
 .ct-lines{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
-.ct-lines path{stroke:#94a3b8;stroke-width:1.4;fill:none}
-.ct-band-line{position:absolute;left:0;height:0;border-top:1px dashed #e2e8f0;z-index:0}
-.ct-gut{position:absolute;left:0;width:64px;box-sizing:border-box;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;background:#f8fafc;border-right:1px solid #e2e8f0;z-index:3}
-.ct-gut-gen{font-size:.72rem;color:#64748b;font-weight:600}
-.ct-gut-cg{font-size:1rem;color:#b45309;font-weight:700;margin-top:.15rem}
-.ct-box{position:absolute;box-sizing:border-box;z-index:2;background:#fff;border:1px solid #cbd5e1;
-  border-radius:7px;padding:6px 4px 4px;text-align:center;cursor:pointer;overflow:hidden;
-  box-shadow:0 1px 2px rgba(15,23,42,.06);transition:box-shadow .12s,border-color .12s}
-.ct-box:hover{border-color:#2563eb;box-shadow:0 2px 8px rgba(37,99,235,.18);z-index:5}
-.ct-box.ct-direct{background:#ecfdf5;border-color:#10b981}
-.ct-box.ct-dead .ct-name{color:#334155}
-.ct-name{font-size:.84rem;font-weight:600;color:#0f172a;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ct-cg{display:inline-block;font-size:.62rem;font-weight:600;color:#b45309;background:#fffbeb;
-  border:1px solid #fde68a;border-radius:4px;padding:0 .18em;margin-left:.2em;vertical-align:.06em}
-.ct-years{font-size:.66rem;color:#94a3b8;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ct-sp{font-size:.7rem;color:#7c3aed;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ct-appendix{margin-top:1rem;border:1px solid var(--line);border-radius:var(--r-md);background:#fffdf7;padding:.7rem .9rem}
-.ct-appendix-h{font-weight:600;color:#92400e;margin-bottom:.3rem}
+.ct-lines path{stroke:#9aa6b6;stroke-width:1.3;fill:none}
+.ct-band-line{position:absolute;left:0;height:0;border-top:1px dashed #eef2f7;z-index:0}
+.ct-gut{position:absolute;left:0;width:42px;box-sizing:border-box;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;background:#f8fafc;border-right:1px solid #eef2f7;z-index:3}
+.ct-gut-gen{font-size:.7rem;color:#64748b;font-weight:600}
+.ct-gut-cg{font-size:.92rem;color:#b45309;font-weight:700;margin-top:.1rem}
+/* 竖排框:名字从上到下;宽=一列;高随内容(本人+配偶) */
+.ct-box{position:absolute;box-sizing:border-box;z-index:2;width:26px;background:#fff;border:1px solid #cbd5e1;
+  border-radius:5px;padding:5px 2px;cursor:pointer;
+  writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;text-align:center;
+  display:flex;align-items:center;justify-content:flex-start;
+  box-shadow:0 1px 1.5px rgba(15,23,42,.05);transition:box-shadow .1s,border-color .1s}
+.ct-box:hover{border-color:#2563eb;box-shadow:0 2px 8px rgba(37,99,235,.2);z-index:5}
+.ct-box.ct-direct{border-color:#10b981;border-width:1.5px;background:#f6fefb}
+.ct-name{font-size:14px;font-weight:600;letter-spacing:1px}
+.ct-sp{font-size:11.5px;font-weight:500;letter-spacing:1px;opacity:.92}
+.ct-spsep{font-size:5px}                 /* 本人与配偶之间的小竖向间隔(全角空格缩小) */
+.ct-appendix{margin-top:.7rem;border:1px solid var(--line);border-radius:var(--r-md);background:#fffdf7;padding:.5rem .8rem}
+.ct-appendix-h{font-weight:600;color:#92400e;cursor:pointer;font-size:.92rem}
 .ct-orphan-row{margin:.3rem 0;font-size:.9rem;line-height:1.7}
 .ct-orphan-gen{display:inline-block;min-width:4.5em;color:#64748b;font-size:.8rem}
-.ct-orphan{color:#1d4ed8;cursor:pointer;text-decoration:none}
+.ct-orphan{cursor:pointer;text-decoration:none;font-weight:500}
 .ct-orphan:hover{text-decoration:underline}
 /* 打印 / 存 PDF:只留谱图,去掉页面其余 chrome */
 @media print{
@@ -335,6 +334,7 @@ table.roster tbody tr:hover{background:#ecfdf5}
   body.ct-printing #treeModeBar,body.ct-printing #treeMermaidNote{display:none!important}
   body.ct-printing .view:not(#view-tree){display:none!important}
   body.ct-printing .ct-scroll{overflow:visible;border:none;height:auto!important;max-height:none!important}
+  body.ct-printing .ct-wrap,body.ct-printing .ct-canvas{transform:none!important;width:auto!important;height:auto!important}
   body.ct-printing main{padding:0;margin:0}
   @page{size:landscape;margin:8mm}
 }
