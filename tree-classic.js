@@ -121,7 +121,7 @@ function renderClassicTree(){
 
   // 2) 建竖排框(先 top=0、隐藏待测)
   const nodeEls = {};
-  const goneCls = pp => (pp && pp.alive === "否") ? " ct-gone" : "";   // 已故=该人名字旁描竖线(不动整框颜色;夫妻一存一殁只标殁者)
+  const goneCls = pp => (pp && pp.alive === "否") ? " ct-gone" : "";   // 已故=该人名字外加"牌位"框(框+浅灰底;不动整框、夫妻一存一殁只标殁者)
   F.nodes.forEach(id => {
     const p = byId(id) || {};
     let inner = `<span class="ct-name${goneCls(p)}" style="color:${sexColor(p)}">${esc(p.name || "(无名)")}</span>`;
@@ -205,7 +205,7 @@ function ctControlsHtml(famOpts, zoom){
     + `<button class="btn btn-sm" id="ctZoomFit">适应整页</button>`
     + `<button class="btn btn-sm" id="ctZoomReset">100%</button></span>`
     + `<button class="btn btn-sm" id="ctPrint">🖨 打印 / 存 PDF</button>`
-    + `<span class="hint"><b style="color:#1d4ed8">男</b>·<b style="color:#db2777">女</b> 不同色;<span class="ct-leg-gone">名字旁竖线</span>=已故;绿框=直系;点框看详情。</span>`
+    + `<span class="hint"><b style="color:#1d4ed8">男</b>·<b style="color:#db2777">女</b> 不同色;<span class="ct-leg-gone">名字加框</span>=已故;绿框=直系;点框看详情。</span>`
     + `</div>`;
 }
 function ctHeaderHtml(LIN, F){
