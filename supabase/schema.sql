@@ -111,3 +111,29 @@ create table if not exists public.history (
   undone    integer default 0,
   created_at timestamptz not null default now()
 );
+
+-- 纪要(会议录音笔记;v0.41+)。一条 = 一次录音/会议。RLS/触发器/recordings 桶见 minutes.sql。
+-- 录音存私有桶 recordings;转写(阿里 Fun-ASR)+ 摘要/任务/脑图(DeepSeek)结果落本表。
+create table if not exists public.minutes (
+  id              bigint generated always as identity primary key,
+  title           text default '',
+  meeting_at      text default '',                       -- 会议时间备注(自由文本/日期)
+  note            text default '',                        -- 人工备注/描述
+  status          text default 'draft',                   -- draft/uploading/uploaded/transcribing/transcribed/done/failed
+  audio_path      text default '',                        -- recordings 桶对象 key,如 minutes/<id>/<uuid>.m4a
+  audio_mime      text default '',
+  audio_size      bigint default 0,
+  duration_sec    integer default 0,
+  asr_task_id     text default '',                        -- 阿里 DashScope 异步任务 id
+  asr_error       text default '',                        -- 转写失败原因(供重试)
+  transcript      text default '',                        -- 转写全文
+  transcript_json jsonb not null default '[]'::jsonb,     -- 分段 [{start,end,speaker,text}]
+  summary         text default '',                        -- DeepSeek 摘要
+  tasks           jsonb not null default '[]'::jsonb,     -- DeepSeek 任务 [{task,owner,due}]
+  mindmap         text default '',                        -- DeepSeek 脑图(mermaid mindmap 文本)
+  created_by      uuid default auth.uid(),                -- 作者(由触发器服务端强制,不信前端)
+  created_by_email text default '',
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+create index if not exists minutes_created_idx on public.minutes(created_at desc);

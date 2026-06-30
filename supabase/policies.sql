@@ -7,7 +7,23 @@
 -- 切记:service_role 密钥永不进前端/仓库。
 -- =====================================================================
 
--- 8 张表:任意已登录可读;仅 editor 可增删改
+-- ---------------------------------------------------------------------
+-- 角色/权限助手(读 JWT;stable 因依赖每请求的令牌)。集中定义,避免各处复制 JWT 表达式漂移。
+--   can_write()   = role ∈ {editor, admin}(admin 是 editor 超集,也能写数据/传照片)
+--   can_minutes() = role=admin 或 app_metadata.perms 数组含 'minutes'(纪要访问)
+-- perms 用 #>(取 jsonb)而非 #>>(取 text);coalesce 成 '[]' 保证 ? 不返 NULL(null-safe)。
+-- ---------------------------------------------------------------------
+create or replace function public.can_write() returns boolean
+language sql stable as $$
+  select (auth.jwt() #>> '{app_metadata,role}') in ('editor','admin')
+$$;
+create or replace function public.can_minutes() returns boolean
+language sql stable as $$
+  select ((auth.jwt() #>> '{app_metadata,role}') = 'admin')
+      or coalesce(auth.jwt() #> '{app_metadata,perms}', '[]'::jsonb) ? 'minutes'
+$$;
+
+-- 8 张表:任意已登录可读;editor 或 admin 可增删改(can_write)
 do $$
 declare t text;
 begin
@@ -20,8 +36,8 @@ begin
                        for select to authenticated using (true)$p$, t);
     execute format($p$create policy "write editor" on public.%I
                        for all to authenticated
-                       using ((auth.jwt() #>> '{app_metadata,role}') = 'editor')
-                       with check ((auth.jwt() #>> '{app_metadata,role}') = 'editor')$p$, t);
+                       using (public.can_write())
+                       with check (public.can_write())$p$, t);
   end loop;
 end $$;
 
@@ -42,9 +58,11 @@ drop policy if exists "photos editor write"  on storage.objects;
 drop policy if exists "photos editor update" on storage.objects;
 drop policy if exists "photos editor delete" on storage.objects;
 create policy "photos editor write" on storage.objects for insert to authenticated
-  with check (bucket_id='photos' and (auth.jwt() #>> '{app_metadata,role}') = 'editor');
+  with check (bucket_id='photos' and public.can_write());
 create policy "photos editor update" on storage.objects for update to authenticated
-  using (bucket_id='photos' and (auth.jwt() #>> '{app_metadata,role}') = 'editor');
+  using (bucket_id='photos' and public.can_write());
 create policy "photos editor delete" on storage.objects for delete to authenticated
-  using (bucket_id='photos' and (auth.jwt() #>> '{app_metadata,role}') = 'editor');
+  using (bucket_id='photos' and public.can_write());
 -- 公开桶的 select 不需策略(公开可读)。
+
+-- 纪要相关 RLS(minutes 表 + recordings 私有桶)见 minutes.sql(本文件之后运行)。

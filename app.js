@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.40.0";
+const APP_VERSION = "v0.41.0";
 const APP_DATE = "2026-06-30";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -48,7 +48,7 @@ const ORIG_IMG = {p1:window.photoUrl("yuanpu/p1.jpg"),p2:window.photoUrl("yuanpu
 const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media","create:relationship"]);
 
 const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[], relTypes:[], relCount:{}, q:"", share:false,
-                editing:null, user:null, canEdit:false, lineage:"",
+                editing:null, user:null, canEdit:false, isAdmin:false, canMinutes:false, lineage:"",
                 graphCenter:"", graphHops:2, pathA:"", pathB:"",
                 fatherOf:{}, motherOf:{}, childrenMap:{}, spouseOf:{}, _genCache:{}, _lineageCache:{}, lineages:null,
                 filters:{charGen:"",status:"",alive:""}, customFilters:[],
@@ -126,9 +126,15 @@ async function loadAll(){
   await refreshRelCount();
   renderHeader(); renderPeople(); renderHistory(); renderVerify(); renderSource();
 }
-function renderAuthBar(){       // 显示当前登录者 + 角色;viewer 隐藏所有 .edit-only 控件
-  const who=$("#whoami"); if(who) who.textContent = state.user ? (state.user.email + (state.canEdit?" · 可编辑":" · 只读")) : "";
+function renderAuthBar(){       // 显示当前登录者 + 角色;viewer 隐藏所有 .edit-only 控件;按权限显隐受限标签页
+  const who=$("#whoami"); if(who) who.textContent = state.user ? (state.user.email + " · " + (state.isAdmin?"管理员":state.canEdit?"可编辑":"只读")) : "";
   document.body.classList.toggle("viewer", !state.canEdit);
+  // 受限标签页(纪要 / 用户管理):无权者不展示(只是 UX;真门禁在 RLS + CF 函数)
+  document.querySelectorAll(".tab[data-perm]").forEach(t=>{
+    const need=t.dataset.perm;
+    const ok = need==="minutes" ? state.canMinutes : need==="admin" ? state.isAdmin : true;
+    t.style.display = ok ? "" : "none";
+  });
 }
 function renderHeader(){
   $("#subtitle").textContent="";   // 谱名/地望副标题已按需去掉(产品是通用关系图谱)
@@ -1215,6 +1221,8 @@ function renderTreeView(){
 /* ---------- 标签切换 ---------- */
 function switchView(name){
   if(name==="overview") name="roster";   // 世系总览已并入名册;旧链接/书签兼容
+  if(name==="minutes" && !state.canMinutes) name="roster";   // 无纪要权限 → 回名册(防直链/书签绕过)
+  if(name==="users" && !state.isAdmin) name="roster";         // 非管理员 → 回名册
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.view===name));
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
   $("#view-"+name).classList.add("active");
@@ -1226,6 +1234,8 @@ function switchView(name){
   if(name==="trash") renderTrash();
   if(name==="health") renderHealth();
   if(name==="log"){ renderBackup(); renderLog(); }
+  if(name==="minutes") window.renderMinutes && window.renderMinutes();
+  if(name==="users") window.renderUsers && window.renderUsers();
 }
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchView(t.dataset.view));
 // 顶栏搜索已并入名册视图内的共用筛选条(renderPeopleFilter);此处不再绑定
@@ -1310,7 +1320,12 @@ async function boot(){
   if(!session){ showLogin(); return; }
   $("#loginMask").classList.remove("open");
   state.user = session.user;
-  state.canEdit = ((state.user&&state.user.app_metadata&&state.user.app_metadata.role)||"viewer")==="editor";
+  const _am = (state.user&&state.user.app_metadata)||{};
+  const _role = _am.role || "viewer";
+  const _perms = Array.isArray(_am.perms) ? _am.perms : [];
+  state.isAdmin = _role==="admin";
+  state.canEdit = _role==="editor" || _role==="admin";          // admin 是 editor 超集
+  state.canMinutes = state.isAdmin || _perms.includes("minutes");
   renderAuthBar();
   try{ await loadAll(); const h=(location.hash||"").replace("#",""); if(h&&document.getElementById("view-"+h)) switchView(h); }
   catch(e){ $("#overview").innerHTML="<p style='padding:1rem;color:#b91c1c'>加载失败:"+esc(e.message)+"</p>"; }

@@ -363,3 +363,47 @@ table.roster tbody tr:hover{background:#ecfdf5}
   body.ct-printing main{padding:0;margin:0}
   @page{size:landscape;margin:8mm}
 }
+
+/* ===== 纪要 + 用户管理(v0.41+)===== */
+/* 用户表 */
+.utable{width:100%;border-collapse:collapse;font-size:.9rem}
+.utable th,.utable td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--line,#e2e8f0);vertical-align:middle}
+.utable th{color:var(--ink-mute,#64748b);font-weight:600;font-size:.82rem}
+.utable .u-acts{white-space:nowrap;display:flex;gap:.3rem;flex-wrap:wrap}
+.utable select{min-width:5.5em}
+
+/* 纪要列表 */
+.mrow{padding:.6rem .7rem;border:1px solid var(--line,#e2e8f0);border-radius:10px;margin:.45rem 0;cursor:pointer;background:#fff;transition:border-color .15s,box-shadow .15s}
+.mrow:hover{border-color:#10b981;box-shadow:0 1px 6px rgba(16,185,129,.12)}
+.mrow-main{display:flex;align-items:center;gap:.5rem;font-size:1rem}
+
+/* 纪要详情 */
+.mdetail{display:flex;flex-direction:column;gap:.2rem}
+.mdet-top{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.mdet-title{font-size:1.15rem}
+.mdet-meta{margin:.1rem 0 .4rem}
+.mdet-note{background:#f8fafc;border:1px solid var(--line,#e2e8f0);border-radius:8px;padding:.5rem .7rem;margin:.2rem 0 .5rem;white-space:pre-wrap}
+.mdet-sec{margin-top:.9rem;padding-top:.7rem;border-top:1px solid var(--line,#eef2f7)}
+.recctl{display:flex;align-items:center;gap:.6rem}
+.rectime{font-variant-numeric:tabular-nums;font-weight:700;color:#dc2626;font-size:1.1rem}
+
+/* 转写分段 */
+.tlist{display:flex;flex-direction:column;gap:.15rem;max-height:46vh;overflow:auto;border:1px solid var(--line,#e2e8f0);border-radius:8px;padding:.4rem}
+.tseg{display:flex;gap:.5rem;align-items:baseline;padding:.25rem .35rem;border-radius:6px;cursor:pointer}
+.tseg:hover{background:#f1f5f9}
+.tt{font-variant-numeric:tabular-nums;color:#64748b;font-size:.78rem;min-width:3em}
+.tspk{font-size:.72rem;color:#2563eb;border:1px solid #bfdbfe;border-radius:5px;padding:0 .3rem;white-space:nowrap}
+.ttx{flex:1}
+.tplain{white-space:pre-wrap;line-height:1.7;max-height:46vh;overflow:auto;border:1px solid var(--line,#e2e8f0);border-radius:8px;padding:.6rem}
+
+/* AI 卡片 */
+.ai-grid{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-top:.5rem}
+.ai-card{border:1px solid var(--line,#e2e8f0);border-radius:10px;padding:.6rem .7rem;background:#fff}
+.ai-card-wide{grid-column:1/-1}
+.ai-h{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-weight:600;margin-bottom:.4rem}
+.ai-body{font-size:.92rem;line-height:1.65}
+.mindmap-body{overflow:auto}
+.mindmap-body svg{max-width:100%}
+.tasklist{margin:.2rem 0;padding-left:1.1rem;list-style:none}
+.tasklist li{margin:.25rem 0}
+@media(max-width:680px){ .ai-grid{grid-template-columns:1fr} }
