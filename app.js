@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.33.0";
+const APP_VERSION = "v0.34.0";
 const APP_DATE = "2026-06-30";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -52,7 +52,7 @@ const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[],
                 graphCenter:"", graphHops:2, pathA:"", pathB:"",
                 fatherOf:{}, motherOf:{}, childrenMap:{}, spouseOf:{}, _genCache:{}, _lineageCache:{}, lineages:null,
                 filters:{charGen:"",status:"",alive:""}, customFilters:[],
-                treeMode:null, classicLineage:null, classicZoom:1 };
+                treeMode:null, classicLineage:null, classicZoom:null };   // classicZoom=null ⇒ 传统谱图默认"适应整页"
 
 // api(method,path,body) 由 db.js 提供(Supabase shim);此处不再定义。
 async function reloadPersons(){ state.persons = await api("GET","/api/persons"); }
