@@ -89,8 +89,9 @@ async function createPerson(body){
   const pid = (body.id||"").trim() || await nextId();
   if(await getPerson(pid)) throw new Error("ID 已存在: "+pid);
   const rec = { id:pid }; EDITABLE.forEach(k=> rec[k]= body[k]!=null?body[k]:"");
+  if(!String(rec.alive||"").trim()) rec.alive="是";   // 新建人物默认「在世」(未显式指定 alive 时);各创建入口统一在此兜底
   const row = must(await sb.from("persons").insert(rec).select().single());
-  await logHist("create","person",pid,"新增人物: "+(body.name||pid), null, { id:pid, ...Object.fromEntries(EDITABLE.map(k=>[k,body[k]||""])) });
+  await logHist("create","person",pid,"新增人物: "+(body.name||pid), null, { id:pid, ...Object.fromEntries(EDITABLE.map(k=>[k,rec[k]||""])) });
   return row;
 }
 async function updatePerson(pid, body){

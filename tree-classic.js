@@ -121,13 +121,13 @@ function renderClassicTree(){
 
   // 2) 建竖排框(先 top=0、隐藏待测)
   const nodeEls = {};
+  const goneCls = pp => (pp && pp.alive === "否") ? " ct-gone" : "";   // 已故=该人名字旁描竖线(不动整框颜色;夫妻一存一殁只标殁者)
   F.nodes.forEach(id => {
     const p = byId(id) || {};
-    let inner = `<span class="ct-name" style="color:${sexColor(p)}">${esc(p.name || "(无名)")}</span>`;
+    let inner = `<span class="ct-name${goneCls(p)}" style="color:${sexColor(p)}">${esc(p.name || "(无名)")}</span>`;
     ctInnerSpouses(id, F.nodeSet).forEach(s => { const q = byId(s) || {};
-      inner += `<span class="ct-spsep">　</span><span class="ct-sp" style="color:${sexColor(q)}">${esc(q.name || "")}</span>`; });
-    const aliveCls = p.alive === "否" ? " ct-dead" : (p.alive === "是" ? "" : " ct-unknown");   // 已故=灰底;在世=白底;未知=虚线框
-    const d = el("div", "ct-box" + (DIRECT_LINE.has(id) ? " ct-direct" : "") + aliveCls);
+      inner += `<span class="ct-spsep">　</span><span class="ct-sp${goneCls(q)}" style="color:${sexColor(q)}">${esc(q.name || "")}</span>`; });
+    const d = el("div", "ct-box" + (DIRECT_LINE.has(id) ? " ct-direct" : ""));
     d.dataset.pid = id;
     d.title = (p.name || "") + (p.sex ? (" · " + p.sex) : "") + (p.alive === "否" ? " · 已故" : (p.alive === "是" ? " · 在世" : " · 在世未知"));
     d.style.left = boxLeft(id) + "px"; d.style.top = "0px"; d.style.visibility = "hidden";
@@ -198,13 +198,14 @@ function ctDominantCharGen(F, b){
 function ctControlsHtml(famOpts, zoom){
   return `<div class="ct-controls">`
     + `<label>家族 <select id="ctFam">${famOpts}</select></label>`
+    + `<button class="btn btn-sm" id="ctRefresh" title="重新拉取最新人物/关系后重画">🔄 刷新</button>`
     + `<span class="ct-zoom">缩放 <button class="btn btn-sm" id="ctZoomOut">−</button>`
     + `<span id="ctZoomVal">${Math.round(zoom * 100)}%</span>`
     + `<button class="btn btn-sm" id="ctZoomIn">＋</button>`
     + `<button class="btn btn-sm" id="ctZoomFit">适应整页</button>`
     + `<button class="btn btn-sm" id="ctZoomReset">100%</button></span>`
     + `<button class="btn btn-sm" id="ctPrint">🖨 打印 / 存 PDF</button>`
-    + `<span class="hint"><b style="color:#1d4ed8">男</b>·<b style="color:#db2777">女</b> 不同色;<span class="ct-leg-dead">灰底</span>=已故 · 白底=在世 · <span class="ct-leg-unk">虚线</span>=未知;绿框=直系;点框看详情。</span>`
+    + `<span class="hint"><b style="color:#1d4ed8">男</b>·<b style="color:#db2777">女</b> 不同色;<span class="ct-leg-gone">名字旁竖线</span>=已故;绿框=直系;点框看详情。</span>`
     + `</div>`;
 }
 function ctHeaderHtml(LIN, F){
@@ -239,6 +240,11 @@ function ctBindControls(){
   const zf = $("#ctZoomFit"); if (zf) zf.onclick = () => { state.classicZoom = null; renderClassicTree(); };   // 适应整页
   const pr = $("#ctPrint"); if (pr) pr.onclick = () => { document.body.classList.add("ct-printing"); window.print();
     setTimeout(() => document.body.classList.remove("ct-printing"), 500); };
+  const rf = $("#ctRefresh"); if (rf) rf.onclick = async () => {   // 重新拉最新人物+关系边后重画(别处改了人,回这里点一下即更新)
+    rf.disabled = true; const old = rf.textContent; rf.textContent = "刷新中…";
+    try { await reloadPersons(); await refreshRelCount(); } catch (e) {}
+    renderClassicTree();   // 重画时会重建控件,rf 引用失效;无需手动恢复
+  };
 }
 
 Object.assign(window, { renderClassicTree, buildClassicForest });
