@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.32.0";
+const APP_VERSION = "v0.33.0";
 const APP_DATE = "2026-06-30";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -51,7 +51,8 @@ const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[],
                 editing:null, user:null, canEdit:false, lineage:"",
                 graphCenter:"", graphHops:2, pathA:"", pathB:"",
                 fatherOf:{}, motherOf:{}, childrenMap:{}, spouseOf:{}, _genCache:{}, _lineageCache:{}, lineages:null,
-                filters:{charGen:"",status:"",alive:""}, customFilters:[] };
+                filters:{charGen:"",status:"",alive:""}, customFilters:[],
+                treeMode:null, classicLineage:null, classicZoom:1 };
 
 // api(method,path,body) 由 db.js 提供(Supabase shim);此处不再定义。
 async function reloadPersons(){ state.persons = await api("GET","/api/persons"); }
@@ -1187,6 +1188,20 @@ function renderRoster(list){   // list 由 renderPeople 传入(已搜索+筛选)
   box.querySelectorAll("tbody tr").forEach(tr=>tr.onclick=()=>{ const p=byId(tr.dataset.pid); if(p) openDetail(p); });   // 点行看详情(含关系列表),编辑走详情里「编辑」
 }
 
+/* ---------- 家族树:两种排版(传统谱图 / 自动树图)切换 ---------- */
+function renderTreeView(){
+  const mode = state.treeMode || (state.treeMode = (localStorage.getItem("tree_mode") || "classic"));
+  const bar = $("#treeModeBar");
+  if(bar){
+    bar.innerHTML = [["classic","📜 传统谱图"],["mermaid","🌳 自动树图"]]
+      .map(([v,l])=>`<button class="btn btn-sm${mode===v?" btn-primary":""}" data-tm="${v}">${l}</button>`).join("");
+    bar.querySelectorAll("[data-tm]").forEach(b=>b.onclick=()=>{ state.treeMode=b.dataset.tm; try{localStorage.setItem("tree_mode",b.dataset.tm);}catch(e){} renderTreeView(); });
+  }
+  const note=$("#treeMermaidNote"); if(note) note.style.display=(mode==="mermaid")?"":"none";
+  if(mode==="classic"){ if(window.renderClassicTree) window.renderClassicTree(); else { const b=$("#treeBox"); if(b) b.textContent="传统谱图模块加载中…(请稍候或刷新)"; } }
+  else renderTree();
+}
+
 /* ---------- 标签切换 ---------- */
 function switchView(name){
   if(name==="overview") name="roster";   // 世系总览已并入名册;旧链接/书签兼容
@@ -1194,7 +1209,7 @@ function switchView(name){
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
   $("#view-"+name).classList.add("active");
   if(location.hash!=="#"+name) location.hash=name;
-  if(name==="tree") renderTree();
+  if(name==="tree") renderTreeView();
   if(name==="graph") renderGraph();
   if(name==="roster") renderPeople();
   if(name==="families") renderFamilies();
@@ -1276,7 +1291,7 @@ $("#exGedcom")    && ($("#exGedcom").onclick=()=>window.EXPORT.gedcom());
 $("#exJson")      && ($("#exJson").onclick=()=>window.EXPORT.json(state.share));
 
 /* ---------- 跨模块共享:把核心符号挂到 window,供抽出的工具模块(tools-*.js,模块内裸引用经全局对象解析)使用 ---------- */
-Object.assign(window, { state, $, el, esc, byId, FORM_KEYS, ROSTER_COLS, DIRECT_LINE, UNDOABLE, ORIG_IMG, APP_NAME, APP_VERSION, getMermaid, openLightbox, _lbStep, _renderLightbox, reloadPersons, refreshRelCount, genOf, _genWalk, rootOfPatriline, lineageOf, surnameOfSelf, familiesOf, famCfg, charGenFor, lineagesList, reloadEverything, loadAll, renderAuthBar, renderHeader, matchQ, peopleFiltered, renderPeopleFilter, _personOptsBirth, openBulkRel, renderPeople, renderCards, statusPill, aliveTag, personCard, renderTree, renderHistory, parseCharGen, renderFamilies, renderVerify, verifyRow, renderSource, renderTrash, diffHtml, renderLog, renderBackup, expectedCharGen, charGenAuto, renderMedia, mediaItem, runHealth, renderHealth, openMergeDialog, childrenOf, ancestorChain, closeDetail, openDetail, openAddRelative, relOptions, relOptionsHtml, resolveRel, initRelAuto, spouseEndpointIds, coParentDecision, maybeLinkCoParent, pickCoParent, maybeSuggestSpouseCoParent, suggestSpouseChildren, backfillCoParentDrafts, openBackfillDialog, fillFatherSelect, openEdit, closeModal, toggleDeathFields, collectForm, reconcileFatherEdge, saveModal, delModal, compressImage, uploadMedia, personOptions, getECharts, bfsPath, fillGraphControls, renderGraph, rosterCols, recentSearches, pushRecentSearch, clearRecentSearches, recordSearchDebounced, cellVal, renderRoster, switchView, showLogin, boot });
+Object.assign(window, { state, $, el, esc, byId, FORM_KEYS, ROSTER_COLS, DIRECT_LINE, UNDOABLE, ORIG_IMG, APP_NAME, APP_VERSION, getMermaid, openLightbox, _lbStep, _renderLightbox, reloadPersons, refreshRelCount, genOf, _genWalk, rootOfPatriline, lineageOf, surnameOfSelf, familiesOf, famCfg, charGenFor, lineagesList, reloadEverything, loadAll, renderAuthBar, renderHeader, matchQ, peopleFiltered, renderPeopleFilter, _personOptsBirth, openBulkRel, renderPeople, renderCards, statusPill, aliveTag, personCard, renderTree, renderTreeView, renderHistory, parseCharGen, renderFamilies, renderVerify, verifyRow, renderSource, renderTrash, diffHtml, renderLog, renderBackup, expectedCharGen, charGenAuto, renderMedia, mediaItem, runHealth, renderHealth, openMergeDialog, childrenOf, ancestorChain, closeDetail, openDetail, openAddRelative, relOptions, relOptionsHtml, resolveRel, initRelAuto, spouseEndpointIds, coParentDecision, maybeLinkCoParent, pickCoParent, maybeSuggestSpouseCoParent, suggestSpouseChildren, backfillCoParentDrafts, openBackfillDialog, fillFatherSelect, openEdit, closeModal, toggleDeathFields, collectForm, reconcileFatherEdge, saveModal, delModal, compressImage, uploadMedia, personOptions, getECharts, bfsPath, fillGraphControls, renderGraph, rosterCols, recentSearches, pushRecentSearch, clearRecentSearches, recordSearchDebounced, cellVal, renderRoster, switchView, showLogin, boot });
 
 /* ---------- 登录门 ---------- */
 function showLogin(){ $("#loginMask").classList.add("open"); $("#loginPw").value=""; $("#loginErr").textContent=""; }

@@ -60,7 +60,8 @@
     <div id="rosterBox"></div>
   </section>
   <section class="view" id="view-tree">
-    <p class="note">家族树由“父ID”自动生成;实线=明确父子。改了人物父ID,回本页自动刷新。绿色=本谱直系。
+    <div class="treemodebar" id="treeModeBar" style="display:flex;gap:.4rem;margin-bottom:.5rem;flex-wrap:wrap"></div>
+    <p class="note" id="treeMermaidNote" style="display:none">家族树由“父ID”自动生成;实线=明确父子。改了人物父ID,回本页自动刷新。绿色=本谱直系。
       <button class="btn btn-sm" id="reTree">刷新树图</button></p>
     <div id="treeBox">加载中…</div>
   </section>
@@ -269,12 +270,13 @@
 </div>
 
 <!-- ?v= 随版本递增,确保部署后浏览器加载最新代码(改版本时同步改这里) -->
-<script src="config.js?v=0.32.0"></script>
-<script type="module" src="db.js?v=0.32.0"></script>
-<script type="module" src="app.js?v=0.32.0"></script>
-<script type="module" src="calendar.js?v=0.32.0"></script>
+<script src="config.js?v=0.33.0"></script>
+<script type="module" src="db.js?v=0.33.0"></script>
+<script type="module" src="app.js?v=0.33.0"></script>
+<script type="module" src="calendar.js?v=0.33.0"></script>
 <!-- 抽出的工具模块:必须在 app.js 之后(app.js 末尾把核心符号挂到 window 供其裸引用) -->
-<script type="module" src="tools-dates-import-ai.js?v=0.32.0"></script>
-<script type="module" src="tools-spouse.js?v=0.32.0"></script>
+<script type="module" src="tools-dates-import-ai.js?v=0.33.0"></script>
+<script type="module" src="tools-spouse.js?v=0.33.0"></script>
+<script type="module" src="tree-classic.js?v=0.33.0"></script>
 </body>
 </html>
