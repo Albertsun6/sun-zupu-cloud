@@ -6,10 +6,10 @@
 | | |
 |---|---|
 | **产品名** | 关系图谱（品牌固定常量 `APP_NAME`；本质=人物关系图谱，由《孙氏族谱》东北一脉演化而来，已泛化为不限一族一姓的属性图工具，仍能当家谱用） |
-| **当前版本** | v0.32.0 |
+| **当前版本** | v0.33.0 |
 | **最近更新** | 2026-06-30 |
 | **技术栈** | 纯静态 vanilla JS（无构建、纯 ESM + CDN）+ Cloudflare Pages + Supabase(Postgres/Auth/Storage) + CF Pages Functions(代理 AI) |
-| **前端文件** | `app.js`(核心:state/helpers/render*/CRUD/详情/编辑/boot,~1300行)、`tools-dates-import-ai.js`(日期规范化+表格导入+AI批量)、`tools-spouse.js`(配偶 blob 转边)、`db.js`(数据层)、`calendar.js`(万年历)。**模块加载顺序**:db→app→calendar→tools-*(tools 在 app 之后,app 末尾把核心符号挂 window 供其裸引用)。改版本必须同步改 `index.html` 全部 `?v=`。 |
+| **前端文件** | `app.js`(核心:state/helpers/render*/CRUD/详情/编辑/boot,~1300行)、`tools-dates-import-ai.js`(日期规范化+表格导入+AI批量)、`tools-spouse.js`(配偶 blob 转边)、`tree-classic.js`(传统谱图挂图渲染)、`db.js`(数据层)、`calendar.js`(万年历)。**模块加载顺序**:db→app→calendar→tools-*→tree-classic(均在 app 之后,app 末尾把核心符号挂 window 供其裸引用)。改版本必须同步改 `index.html` 全部 `?v=`。 |
 | **线上** | https://sun-zupu-cloud.pages.dev ｜ Supabase ref `ktalsyrxueabdisrszde`(新加坡) |
 | **维护说明** | 本规格描述"系统能做什么"(功能/数据契约/安全模型)；操作手册见各项目 USAGE 约定；backlog 见 `../待做功能清单.md`。 |
 
@@ -48,8 +48,12 @@
 - **🔗 批量加关系**(editor)：把当前筛选这组人批量加为某中心人物的某关系(默认同事)，排除本人/已存在边，逐条可撤销。
 - 关键函数：`renderPeople/renderRoster/renderCards/peopleFiltered/cellVal/personCard/openBulkRel`。
 
-### 2.2 家族树（`renderTree`）
-- 由 father 边自动生成 Mermaid `graph TD`；节点显姓名+生卒；绿色高亮 `DIRECT_LINE` 直系；按 `state.lineage` 可限族；离线/失败回退文字。Mermaid 懒加载。
+### 2.2 家族树（`renderTreeView` 双模式：传统谱图 / 自动树图）
+- **模式开关**（`#treeModeBar`，记忆于 `localStorage.tree_mode`，**默认传统谱图**）：
+  - **📜 传统谱图**（`tree-classic.js`，新）：手绘族谱挂图式排版——**按世代分层成行**，一框=一位父系成员、**配偶列在框内**（嫁入者不单独成框）、**直角折线**连父子/兄弟、**左侧世代+字辈栏**、绿框=`DIRECT_LINE` 直系。家族下拉（默认**孙氏**）、缩放（＋/−/适应宽度/100%）、**🖨 打印/存 PDF**（横向、只留谱图）。点框→详情。**无父子连接的本族成员**单列「待接续」附录(点开可考证补录,不强行接树)。
+  - **🌳 自动树图**（`renderTree`）：原 Mermaid `graph TD`，懒加载，离线/失败回退文字。
+- 布局算法（纯前端,L3 派生不落库）：节点=父系同姓血脉且与本族有父/母子连接者;纵=`genOf` 世代行,但强制「子行>父行」(防 genOf 偶发不一致致父子同行重叠);横=叶子计数 tidy(叶子顺序排、内部节点居中于子女)——保证同代框水平间距 ≥1 列(无重叠,已用真实库探针证实)。配偶取 `state.spouseOf` 中**非节点且未软删**者。
+- 关键文件/函数：`tree-classic.js`(`renderClassicTree/buildClassicForest`)、`app.js`(`renderTreeView` 调度 + 模式开关)、`renderTree`(Mermaid)。`DIRECT_LINE`、`genOf/surnameOfSelf/familiesOf/charGenFor/lineagesList` 经 window 复用。
 
 ### 2.3 关系图（`renderGraph`，ECharts 力导向，懒加载）
 - 节点=人(绿在世/灰已故/黄未知，大小随度数)，边=关系(按类型上色、有向箭头、连线显称谓)；拖拽/缩放/悬停高亮；点节点→详情。
@@ -178,3 +182,4 @@ GET `/api/{meta,persons,trash,narratives,verify,transcription,history,backups,au
 
 - **2026-06-30 v0.31.0**：修导出/备份取数 bug(`fullData` 误取回收站→改 `listAllPersons` 全量)；GEDCOM/分享 HTML 改读 father 边(找回 15 条父子链)；删关系边存 before 并纳入可撤销(改父亲可撤)；reconcileFatherEdge 不再静默吞错；导入止血(预分配号段 `allocIds` + 并发池);全量读取加 `selectAll` 分页防 1000 行截断。首版 FEATURES.md。
 - **2026-06-30 v0.32.0**：app.js 模块化(零构建)——把「配偶 blob 转边」抽到 `tools-spouse.js`、「日期规范化+表格导入+AI批量」抽到 `tools-dates-import-ai.js`;app.js 1934→~1300 行。机制:app.js 末尾把核心符号挂 window,工具模块裸引用经全局对象解析、并把自己公开函数+事件绑定挂回 window。函数体零改写。浏览器实测全过(登录/渲染/导入·AI·日期规范化·配偶转换 各入口零报错)。
+- **2026-06-30 v0.33.0**：家族树新增 **📜 传统谱图** 模式(`tree-classic.js`,与原 Mermaid 自动树图并存、默认传统谱图):手绘族谱挂图式分代排版——夫妻同框(配偶列框内)、直角折线连父子/兄弟、左侧世代+字辈栏、绿框=本谱直系、家族下拉(默认孙氏)、缩放+打印存PDF、无父子连接者列「待接续」附录。布局=`genOf` 分代行(强制子行>父行防重叠)+ 叶子计数 tidy 横排。**验证**:.mjs 探针对真实库(200人/98孙氏→63框/2根/9世)断言 14 项全过(关键:同代框水平间距 ≥152px 无重叠、父子链无环、连线无逆向);浏览器实测(默认渲染/点框→详情/模式切换/家族切换/缩放,零报错);**跨模型评审**(cursor-agent GPT-5.5)提 4 处并全修:软删配偶泄漏、母系叶子误入附录、零节点家族不显附录、同姓配偶在框又在附录重复(codex 因环境网络不可用未参与;Claude 多 lens 工作流复核为净)。
