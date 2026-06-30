@@ -293,6 +293,13 @@ table.roster tbody tr:hover{background:#ecfdf5}
 .initrel{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;font-size:.85rem;color:#334155}
 .initrel select{padding:.3rem;border:1px solid var(--line);border-radius:6px;font-size:.85rem}
 
+/* 名册「孙氏」页:按世代分组的小标题(列表/卡片页不出现) */
+.gen-head{display:flex;align-items:baseline;gap:.5rem;margin:1rem 0 .45rem;padding-bottom:.25rem;
+  font-weight:600;font-size:.98rem;color:#0f172a;border-bottom:2px solid #e2e8f0}
+.gen-head:first-child{margin-top:.1rem}
+.gen-cg{font-weight:600;color:#b45309;font-size:.85rem}
+.gen-count{font-weight:400;color:#94a3b8;font-size:.78rem;margin-left:auto}
+
 /* ============ 传统谱图(tree-classic.js)· 竖排紧凑 ============ */
 .ct-controls{display:flex;gap:.55rem;align-items:center;flex-wrap:wrap;margin:.1rem 0 .45rem;font-size:.84rem;color:#334155}
 .ct-controls select{padding:.22rem .4rem;border:1px solid var(--line);border-radius:6px;font-size:.84rem}

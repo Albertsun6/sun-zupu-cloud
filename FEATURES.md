@@ -6,7 +6,7 @@
 | | |
 |---|---|
 | **产品名** | 关系图谱（品牌固定常量 `APP_NAME`；本质=人物关系图谱，由《孙氏族谱》东北一脉演化而来，已泛化为不限一族一姓的属性图工具，仍能当家谱用） |
-| **当前版本** | v0.37.0 |
+| **当前版本** | v0.38.0 |
 | **最近更新** | 2026-06-30 |
 | **技术栈** | 纯静态 vanilla JS（无构建、纯 ESM + CDN）+ Cloudflare Pages + Supabase(Postgres/Auth/Storage) + CF Pages Functions(代理 AI) |
 | **前端文件** | `app.js`(核心:state/helpers/render*/CRUD/详情/编辑/boot,~1300行)、`tools-dates-import-ai.js`(日期规范化+表格导入+AI批量)、`tools-spouse.js`(配偶 blob 转边)、`tree-classic.js`(传统谱图挂图渲染)、`db.js`(数据层)、`calendar.js`(万年历)。**模块加载顺序**:db→app→calendar→tools-*→tree-classic(均在 app 之后,app 末尾把核心符号挂 window 供其裸引用)。改版本必须同步改 `index.html` 全部 `?v=`。 |
@@ -43,8 +43,8 @@
 ### 2.1 名册（默认页）— 列表 / 卡片 / 孙氏三模式
 - **共用筛选条**：搜索（姓名/字号/备注/事迹/居地/字辈/职业/出生地/生卒，IME 不打断、回车选词不误提交）；多条"字段筛选"(字段·包含/等于·值，AND)；命中计数；清除；最近搜索 chips(localStorage)。
 - **列表**：22 可选列(默认 10，存 localStorage)、点表头排序、点行→详情、农历列附属相、`gen/rel_count/lineage` 派生列实时算。
-- **卡片**：平铺(按世代→排序)、缩略图/首字占位、在世标/状态徽/关系数、分享模式脱敏。
-- **孙氏**：`state.lineage="孙氏"` 过滤。
+- **卡片**：平铺(按世代→排序，**不分组**——混合人群)、缩略图/首字占位、在世标/状态徽/关系数、分享模式脱敏。
+- **孙氏**：`state.lineage="孙氏"` 过滤；**同族故按世代分组**——每组前加「第N世 · X字辈 · N人」小标题(`.gen-head`，主字辈取该世众数)；卡片本身样式与「卡片」页一致。`renderCards` 按 `state.lineage` 是否设定区分分组/平铺。
 - **🔗 批量加关系**(editor)：把当前筛选这组人批量加为某中心人物的某关系(默认同事)，排除本人/已存在边，逐条可撤销。
 - 关键函数：`renderPeople/renderRoster/renderCards/peopleFiltered/cellVal/personCard/openBulkRel`。
 
@@ -182,6 +182,7 @@ GET `/api/{meta,persons,trash,narratives,verify,transcription,history,backups,au
 
 - **2026-06-30 v0.31.0**：修导出/备份取数 bug(`fullData` 误取回收站→改 `listAllPersons` 全量)；GEDCOM/分享 HTML 改读 father 边(找回 15 条父子链)；删关系边存 before 并纳入可撤销(改父亲可撤)；reconcileFatherEdge 不再静默吞错；导入止血(预分配号段 `allocIds` + 并发池);全量读取加 `selectAll` 分页防 1000 行截断。首版 FEATURES.md。
 - **2026-06-30 v0.32.0**：app.js 模块化(零构建)——把「配偶 blob 转边」抽到 `tools-spouse.js`、「日期规范化+表格导入+AI批量」抽到 `tools-dates-import-ai.js`;app.js 1934→~1300 行。机制:app.js 末尾把核心符号挂 window,工具模块裸引用经全局对象解析、并把自己公开函数+事件绑定挂回 window。函数体零改写。浏览器实测全过(登录/渲染/导入·AI·日期规范化·配偶转换 各入口零报错)。
+- **2026-06-30 v0.38.0**:名册「**孙氏**」页按世代分组(用户:孙氏页应按辈分排)——`renderCards` 对同族(`state.lineage` 已设)按 `genOf` 分组、每组加「第N世 · X字辈 · N人」小标题(`.gen-head`);**「卡片」「列表」两页保持原样**(平铺/表格不变)。浏览器实测:孙氏 10 组头/104 卡、卡片 0 头/210 卡、列表 210 行、零报错。
 - **2026-06-30 v0.37.0**:已故标记 v0.36 的"名字旁竖线"用户嫌不清晰→经 AskUserQuestion(对比 牌位框/「故」字前缀/已故变灰 三方案+ASCII 预览)定 **"牌位式:名字外加框+浅灰底"**。`.ct-gone` 从 underline 改 `background+border+border-radius+padding`(本人与配偶各自判定不变);名字仍按性别上色。**面积填色比细线耐缩**,适应整页(44%)也一眼可辨。实测 S010 孙鸿林框 于氏/王氏 加框、刘氏(在世)素名无框;零报错。
 - **2026-06-30 v0.36.0**:① **新建人物默认在世**(`db.js createPerson` 未给 `alive` 时兜底「是」,覆盖全部创建入口;api 往返实测新建无 alive 返回「是」)。② 传统谱图**已故标记改"名字旁竖线"**(用户反馈"夫妻一存一殁不能整框变色"):取消整框灰底/虚线,改 `.ct-gone` 给已故者**名字 span**描竖线(竖排 underline 落字侧;本人与配偶各自判定);实测混合夫妻 S010 孙鸿林框内 孙鸿林/于氏/王氏 有线、刘氏(在世)无线。③ 传统谱图加 **🔄 刷新**(重拉 persons+关系边后重画)。浏览器实测零报错。
 - **2026-06-30 v0.35.0**：传统谱图加 **在世/已故区分**(用户要求"先方案再做",经 AskUserQuestion 定"已故=灰底")——**已故=浅灰底(#d6deea)、在世=白底、未知=虚线框**(按本人 `alive`);直系标记从"绿底"改 **绿边框**(与生死底色共存)。底色按本族本人状态(配偶单独状态暂不分,待用户定)。图例补"灰底=已故·白底=在世·虚线=未知"。浏览器实测 64 框中 26 已故灰/37 在世白/1 未知虚线、零报错。

@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.37.0";
+const APP_VERSION = "v0.38.0";
 const APP_DATE = "2026-06-30";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -250,10 +250,20 @@ function renderPeople(){
 function renderCards(list){
   const box=$("#overview"); box.innerHTML="";
   if(!list.length){ box.appendChild(el("p","note","无匹配人物。")); return; }
-  // 平铺卡片(不按世代分组——世代是孙系概念,不适合混合人群);仍按 世代→排序号 排个顺序,但不显「第N代」头
-  const cards=el("div","cards");
-  list.slice().sort((a,b)=>gk(genOf(a.id))-gk(genOf(b.id))||(a.sort_order||0)-(b.sort_order||0)).forEach(p=>cards.appendChild(personCard(p)));
-  box.appendChild(cards);
+  const sorted=list.slice().sort((a,b)=>gk(genOf(a.id))-gk(genOf(b.id))||(a.sort_order||0)-(b.sort_order||0));
+  if(!state.lineage){   // 「卡片」页=混合人群:平铺不分组(世代是同族概念,不适合混合);保持原样
+    const cards=el("div","cards"); sorted.forEach(p=>cards.appendChild(personCard(p))); box.appendChild(cards); return;
+  }
+  // 「孙氏」页=同族:按世代分组,每组前加「第N世 · X字辈」头(同族适合按辈分组织)
+  const groups=new Map();   // key=世代数字 或 "?";sorted 已按世代升序 → Map 保持插入序即升序
+  sorted.forEach(p=>{ const g=genOf(p.id); const k=(g==null?"?":g); if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(p); });
+  groups.forEach((ppl,k)=>{
+    const cnt={}; ppl.forEach(x=>{ const cg=(x.char_gen||"").trim(); if(cg&&cg!=="—") cnt[cg]=(cnt[cg]||0)+1; });   // 该世代主字辈
+    let cg="",n=0; Object.keys(cnt).forEach(c=>{ if(cnt[c]>n){ n=cnt[c]; cg=c; } });
+    const head=el("div","gen-head"); head.innerHTML=(k==="?"?"未定世代":("第"+k+"世"))+(cg?` <span class="gen-cg">${esc(cg)}字辈</span>`:"")+` <span class="gen-count">${ppl.length} 人</span>`;
+    box.appendChild(head);
+    const grid=el("div","cards"); ppl.forEach(p=>grid.appendChild(personCard(p))); box.appendChild(grid);
+  });
 }
 function statusPill(s){const m={"确认":"pill-ok","存疑":"pill-warn","待考":"pill-muted","待补":"pill-info"};return s?`<span class="pill ${m[s]||"pill-muted"}">${esc(s)}</span>`:"";}
 // 在世标:是=绿「在世」/否=不显/空或未知=黄「在世未知」(此前空值被当已故,误)
