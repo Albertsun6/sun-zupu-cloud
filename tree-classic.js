@@ -106,30 +106,27 @@ function renderClassicTree(){
     return;
   }
 
-  // ---- 主树世代行(只含连通节点)----
-  const bands = [...new Set(F.nodes.map(id => F.band[id]))].sort((a, b) => a - b);
-
-  // ---- 待接续(无父子连接的本族成员):右侧一个【紧凑面板】,按世代分小行、挨在一起(不随主树世代行铺开,免得太散)----
-  const ORPHAN_GAP = 2;                                  // 主树与右侧面板之间留的列数
+  // ---- 待接续(无父子连接的本族成员):像孙景发那样,作为普通浮框接在【各自世代行的最右端】(无上连线、无独立面板/标签/虚线)----
+  const ORPHAN_GAP = 2;                                  // 与主树之间留一点点空隙(列)
   const rightBase = F.leafCount + ORPHAN_GAP;
-  const orphanCol = {};                                  // orphan -> 面板内列号
-  const orphanGroups = [];                               // [{gen, ids}] 按世代,每世代一紧凑行
+  const bandsMain = [...new Set(F.nodes.map(id => F.band[id]))];
+  const maxMainBand = bandsMain.length ? Math.max(...bandsMain) : 1;
+  const NULL_BAND = maxMainBand + 1;                     // 世代未定者放最底一行
+  const orphanBand = {}, orphanX = {};
   if (F.orphans.length){
     const osex = id => { const s = (byId(id) || {}).sex; return s === "男" ? 0 : (s === "女" ? 1 : 2); };
     const oyr = id => { const m = ((byId(id) || {}).birth || "").match(/\d{4}/); return m ? +m[0] : 9999; };
-    const byG = {};
-    F.orphans.forEach(o => { const g = genOf(o); const k = (g == null ? 9999 : g); (byG[k] = byG[k] || []).push(o); });
-    Object.keys(byG).map(Number).sort((a, b) => a - b).forEach(gk => {
-      const ids = byG[gk].sort((a, c) => osex(a) - osex(c) || oyr(a) - oyr(c) || (a < c ? -1 : a > c ? 1 : 0));
-      ids.forEach((o, i) => { orphanCol[o] = i; });
-      orphanGroups.push({ gen: gk, ids });
-    });
+    const byB = {};
+    F.orphans.forEach(o => { const g = genOf(o); const b = (g == null ? NULL_BAND : g); orphanBand[o] = b; (byB[b] = byB[b] || []).push(o); });
+    Object.keys(byB).forEach(b => { byB[b].sort((a, c) => osex(a) - osex(c) || oyr(a) - oyr(c) || (a < c ? -1 : a > c ? 1 : 0));
+      byB[b].forEach((o, i) => { orphanX[o] = rightBase + i; }); });
   }
-  const isOrphan = id => orphanCol[id] !== undefined;
-  const xOf = id => isOrphan(id) ? (rightBase + orphanCol[id]) : F.X[id];
+  const isOrphan = id => orphanBand[id] !== undefined;
+  const bandOf = id => isOrphan(id) ? orphanBand[id] : F.band[id];   // 待接续落在自己 genOf 的世代行(与主树该世代对齐)
+  const xOf = id => isOrphan(id) ? orphanX[id] : F.X[id];
   const drawn = F.nodes.concat(F.orphans);
-  const maxOCol = F.orphans.length ? Math.max(...F.orphans.map(o => orphanCol[o])) : 0;
-  const maxX = Math.max(F.leafCount - 1, F.orphans.length ? (rightBase + maxOCol) : 0);
+  const bands = [...new Set(drawn.map(bandOf))].sort((a, b) => a - b);
+  const maxX = Math.max(F.leafCount - 1, ...(F.orphans.length ? F.orphans.map(o => orphanX[o]) : [0]));
   const cx = id => CT.GUTTER_W + CT.PAD_L + xOf(id) * CT.COL + CT.BOX_W / 2;
   const boxLeft = id => cx(id) - CT.BOX_W / 2;
   const totalW = CT.GUTTER_W + CT.PAD_L * 2 + maxX * CT.COL + CT.BOX_W;
@@ -151,7 +148,7 @@ function renderClassicTree(){
     let inner = `<span class="ct-name${goneCls(p)}" data-pid="${esc(id)}" style="color:${sexColor(p)}">${esc(p.name || "(无名)")}</span>`;
     ctInnerSpouses(id, F.nodeSet).forEach(s => { const q = byId(s) || {};
       inner += `<span class="ct-spsep">　</span><span class="ct-sp${goneCls(q)}" data-pid="${esc(s)}" style="color:${sexColor(q)}">${esc(q.name || "")}</span>`; });
-    const d = el("div", "ct-box" + (DIRECT_LINE.has(id) ? " ct-direct" : "") + (isOrphan(id) ? " ct-orphanbox" : ""));
+    const d = el("div", "ct-box" + (DIRECT_LINE.has(id) ? " ct-direct" : ""));   // 待接续=普通框,外观同孙景发(仅无上连线)
     d.dataset.pid = id;
     d.style.left = boxLeft(id) + "px"; d.style.top = "0px"; d.style.visibility = "hidden";
     d.innerHTML = inner;
@@ -160,19 +157,14 @@ function renderClassicTree(){
   });
   ctAttachTips(canvas);   // 名字悬浮提示(主要信息)
 
-  // 3) 测高(节点+待接续)→ 主树逐代行高/行顶 + 待接续紧凑面板(各世代一行、行间紧挨,独立于主树行)
+  // 3) 测高 → 逐代行高(连通+待接续同代一起算高)→ 行顶
   const boxH = {}; drawn.forEach(id => boxH[id] = els[id].offsetHeight || 40);
-  const bandH = {}; bands.forEach(b => bandH[b] = Math.max(40, ...F.nodes.filter(id => F.band[id] === b).map(id => boxH[id])));
+  const bandH = {}; bands.forEach(b => bandH[b] = Math.max(40, ...drawn.filter(id => bandOf(id) === b).map(id => boxH[id])));
   const rowTop = {}; let acc = CT.HEADER_H;
   bands.forEach(b => { rowTop[b] = acc; acc += bandH[b] + CT.ROW_GAP; });
-  const mainBottom = acc;
-  const ORPHAN_TOP = CT.HEADER_H + 24;                   // 面板从标题下方开始
-  const orphanTop = {}; const orphanRows = []; let oacc = ORPHAN_TOP;
-  orphanGroups.forEach(grp => { const h = Math.max(40, ...grp.ids.map(id => boxH[id]));
-    grp.ids.forEach(o => { orphanTop[o] = oacc; }); orphanRows.push({ gen: grp.gen, top: oacc, h }); oacc += h + 16; });
-  const totalH = Math.max(mainBottom, oacc);
-  const topOf = id => isOrphan(id) ? orphanTop[id] : rowTop[F.band[id]];
-  const botOf = id => topOf(id) + boxH[id];
+  const totalH = acc;
+  const topOf = id => rowTop[bandOf(id)];
+  const botOf = id => rowTop[bandOf(id)] + boxH[id];
 
   // 4) 缩放:默认整页可见(state.classicZoom==null 即自动适应);否则用用户设定值
   const availW = (scroll ? scroll.clientWidth : box.clientWidth || 900) - 10;
@@ -196,20 +188,13 @@ function renderClassicTree(){
     kids.forEach((k, i) => { paths += `<path d="M ${kxs[i]} ${busY} L ${kxs[i]} ${tops[i]}"/>`; });
   });
 
-  // 7) 世代栏(左)+ 行分隔 + 右侧待接续紧凑面板(标题 + 每世代小标签 + 分隔竖线)
+  // 7) 世代栏(左)+ 行分隔(待接续随其 genOf 落在对应世代行,无独立面板/标签/虚线)
   let gutter = "";
   bands.forEach(b => { const top = rowTop[b], h = bandH[b]; const cg = ctDominantCharGen(F, b);
-    gutter += `<div class="ct-gut" style="top:${top}px;height:${h}px"><div class="ct-gut-gen">${b}世</div>${cg ? `<div class="ct-gut-cg">${esc(cg)}</div>` : ""}</div>`;
+    const lab = (b === NULL_BAND && F.orphans.some(o => orphanBand[o] === NULL_BAND)) ? "未定" : (b + "世");
+    gutter += `<div class="ct-gut" style="top:${top}px;height:${h}px"><div class="ct-gut-gen">${esc(lab)}</div>${cg ? `<div class="ct-gut-cg">${esc(cg)}</div>` : ""}</div>`;
     gutter += `<div class="ct-band-line" style="top:${top + h + CT.ROW_GAP / 2}px;width:${totalW}px"></div>`;
   });
-  if (F.orphans.length){
-    const divX = CT.GUTTER_W + CT.PAD_L + (F.leafCount - 0.5 + ORPHAN_GAP / 2) * CT.COL;
-    const panelL = CT.GUTTER_W + CT.PAD_L + rightBase * CT.COL - CT.BOX_W / 2;
-    gutter += `<div class="ct-orphan-divider" style="left:${divX}px;height:${totalH}px"></div>`;
-    gutter += `<div class="ct-orphan-tag" style="left:${panelL}px;top:${CT.HEADER_H - 2}px">待接续 ${F.orphans.length} <span class="ct-orphan-tag-sub">无父子连接</span></div>`;
-    orphanRows.forEach(r => { const lab = (r.gen === 9999) ? "未定" : (r.gen + "世");
-      gutter += `<div class="ct-orphan-rowlab" style="left:${panelL - 30}px;top:${r.top + 4}px">${esc(lab)}</div>`; });
-  }
 
   // 8) 组装:svg 底层、gutter 其次、框最上;canvas 用 transform 缩放,wrap 收缩到缩放后尺寸以正确滚动
   canvas.insertAdjacentHTML("afterbegin", `<svg class="ct-lines" width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}">${paths}</svg>`);

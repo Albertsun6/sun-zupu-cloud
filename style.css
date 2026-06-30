@@ -349,13 +349,7 @@ table.roster tbody tr:hover{background:#ecfdf5}
 .ct-orphan-gen{display:inline-block;min-width:4.5em;color:#64748b;font-size:.8rem}
 .ct-orphan{cursor:pointer;text-decoration:none;font-weight:500}
 .ct-orphan:hover{text-decoration:underline}
-/* 右侧"待接续"(无父子连接)浮框:虚线框区别于连通节点 */
-.ct-box.ct-orphanbox{border-style:dashed;border-color:#cbd5e1;background:#fcfcfd}
-.ct-orphan-divider{position:absolute;top:0;width:0;border-left:2px dashed #d8dee7;z-index:1}
-.ct-orphan-tag{position:absolute;z-index:4;writing-mode:horizontal-tb;white-space:nowrap;font-size:11px;font-weight:600;
-  color:#92400e;background:#fffdf7;border:1px solid #f0e6d2;border-radius:5px;padding:1px 6px}
-.ct-orphan-tag-sub{color:#b0a48a;font-weight:400;font-size:9px;margin-left:.25em}
-.ct-orphan-rowlab{position:absolute;z-index:4;writing-mode:horizontal-tb;font-size:10px;color:#94a3b8;white-space:nowrap}
+/* 待接续(无父子连接的本族成员)= 像孙景发那样的普通浮框,接在各自世代行最右端,无独立面板/虚线(故无专用样式) */
 /* 全屏显示谱图(浏览器全屏 API 作用于 #treeBox) */
 #treeBox:fullscreen{background:#fafbfc;padding:.8rem 1rem;overflow:auto}
 #treeBox:-webkit-full-screen{background:#fafbfc;padding:.8rem 1rem;overflow:auto}
