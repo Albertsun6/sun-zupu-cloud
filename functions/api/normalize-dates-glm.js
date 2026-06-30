@@ -30,7 +30,7 @@ export async function onRequestPost({ request, env }){
     const ures = await fetch(SB_URL+"/auth/v1/user", { headers:{ apikey:SB_ANON, authorization:"Bearer "+token } });
     if(!ures.ok) return json({ error:"登录校验失败,请重新登录" }, 401);
     const user = await ures.json();
-    if(((user&&user.app_metadata&&user.app_metadata.role)||"viewer")!=="editor") return json({ error:"需要 editor 权限" }, 403);
+    if(!["editor","admin"].includes((user&&user.app_metadata&&user.app_metadata.role)||"viewer")) return json({ error:"需要 editor 或 admin 权限" }, 403);
 
     const body = await request.json().catch(()=>({}));
     const dates = Array.isArray(body.dates) ? body.dates.map(x=>String(x||"").trim()).filter(Boolean) : [];

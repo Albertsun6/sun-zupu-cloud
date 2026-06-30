@@ -371,6 +371,53 @@ async function api(method, path, body){
 window.api = api;
 
 // ============================================================
+// 纪要(minutes)+ 用户管理(admin)接缝
+//  - minutes 元数据 CRUD 走 PostgREST(RLS 认 app_metadata);录音/转写/AI 与建号/改权限走 CF 函数(持 service_role/各 key)。
+//  - 调 CF 函数都带当前登录用户的 JWT,函数端各自再校验权限(纪要权限 / admin)。
+// ============================================================
+async function _jwt(){ const { data } = await sb.auth.getSession(); return (data.session && data.session.access_token) || ""; }
+async function _fn(path, body){
+  const tok = await _jwt();
+  const r = await fetch(path, { method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+tok }, body: JSON.stringify(body||{}) });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error((d&&d.error)||("请求失败 "+r.status));
+  return d;
+}
+
+window.MINUTES = {
+  list: async () => must(await sb.from("minutes").select("*").order("created_at",{ascending:false})),
+  get:  async (id) => must(await sb.from("minutes").select("*").eq("id",id).maybeSingle()),
+  create: async (body) => must(await sb.from("minutes").insert({ title:body.title||"", meeting_at:body.meeting_at||"", note:body.note||"", status:"draft" }).select().single()),
+  update: async (id, patch) => must(await sb.from("minutes").update(patch).eq("id",id).select().single()),
+  del:    async (id) => { must(await sb.from("minutes").delete().eq("id",id)); return { ok:true }; },
+  // 录音:经 CF 取签名上传 URL → uploadToSignedUrl(token 授权,绕开 storage RLS 的 app_metadata 古怪)
+  uploadAudio: async (id, file, duration) => {
+    const ext = ((file.name||"").split(".").pop() || (String(file.type||"").split("/")[1]) || "m4a").toLowerCase();
+    const { path, token } = await _fn("/api/minutes", { action:"upload-url", minuteId:id, ext, filename:file.name||"" });
+    const up = await sb.storage.from("recordings").uploadToSignedUrl(path, token, file, { contentType:file.type||"application/octet-stream" });
+    if(up.error) throw new Error("上传失败: "+up.error.message);
+    // 绑定到纪要由 CF 函数 service_role 完成(audio_path/status/audio_* 是受控列,客户端 PATCH 改不动)
+    await _fn("/api/minutes", { action:"attach", minuteId:id, path, mime:file.type||"", size:file.size||0, duration:duration||0 });
+    return { path };
+  },
+  playUrl:    async (id) => (await _fn("/api/minutes", { action:"play-url", minuteId:id })).url,
+  transcribe: async (id) => _fn("/api/minutes", { action:"transcribe", minuteId:id }),
+  pollStatus: async (id) => _fn("/api/minutes", { action:"transcribe-status", minuteId:id }),
+  ai:         async (id, kind) => _fn("/api/minutes", { action:"ai", minuteId:id, kind }),
+};
+
+window.ADMIN = {
+  listUsers:     () => _fn("/api/admin-users", { action:"list" }).then(d => d.users || []),
+  createUser:    (email, password, role, perms) => _fn("/api/admin-users", { action:"create", email, password, role, perms }),
+  setRole:       (id, role)  => _fn("/api/admin-users", { action:"setRole", id, role }),
+  setPerms:      (id, perms) => _fn("/api/admin-users", { action:"setPerms", id, perms }),
+  resetPassword: (id, password) => _fn("/api/admin-users", { action:"resetPassword", id, password }),
+  disable:       (id) => _fn("/api/admin-users", { action:"disable", id }),
+  enable:        (id) => _fn("/api/admin-users", { action:"enable", id }),
+  del:           (id) => _fn("/api/admin-users", { action:"delete", id }),
+};
+
+// ============================================================
 // 导出(客户端生成 + 下载)—— 复刻 server.py 的 export_*。redact=隐去联系方式/住址。
 // ============================================================
 function download(filename, content, mime){

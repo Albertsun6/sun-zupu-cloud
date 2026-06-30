@@ -42,12 +42,14 @@
     <button class="tab" data-view="tree">家族树</button>
     <button class="tab" data-view="graph">关系图</button>
     <button class="tab" data-view="history">家史</button>
+    <button class="tab" data-view="minutes" data-perm="minutes" style="display:none">📝 纪要</button>
     <button class="tab" data-view="families">家族管理</button>
     <button class="tab" data-view="verify">待核实</button>
     <button class="tab" data-view="health">数据体检</button>
     <button class="tab" data-view="source">原谱影像与原文</button>
     <button class="tab" data-view="trash">回收站</button>
     <button class="tab" data-view="log">操作历史</button>
+    <button class="tab" data-view="users" data-perm="admin" style="display:none">👤 用户管理</button>
   </nav>
 </header>
 
@@ -102,6 +104,8 @@
     <div id="backupPanel"></div>
     <div id="log"></div>
   </section>
+  <section class="view" id="view-minutes"><div id="minutesBox"></div></section>
+  <section class="view" id="view-users"><div id="usersBox"></div></section>
 </main>
 
 <!-- 登录浮层 -->
@@ -270,13 +274,15 @@
 </div>
 
 <!-- ?v= 随版本递增,确保部署后浏览器加载最新代码(改版本时同步改这里) -->
-<script src="config.js?v=0.40.0"></script>
-<script type="module" src="db.js?v=0.40.0"></script>
-<script type="module" src="app.js?v=0.40.0"></script>
-<script type="module" src="calendar.js?v=0.40.0"></script>
+<script src="config.js?v=0.41.0"></script>
+<script type="module" src="db.js?v=0.41.0"></script>
+<script type="module" src="app.js?v=0.41.0"></script>
+<script type="module" src="calendar.js?v=0.41.0"></script>
 <!-- 抽出的工具模块:必须在 app.js 之后(app.js 末尾把核心符号挂到 window 供其裸引用) -->
-<script type="module" src="tools-dates-import-ai.js?v=0.40.0"></script>
-<script type="module" src="tools-spouse.js?v=0.40.0"></script>
-<script type="module" src="tree-classic.js?v=0.40.0"></script>
+<script type="module" src="tools-dates-import-ai.js?v=0.41.0"></script>
+<script type="module" src="tools-spouse.js?v=0.41.0"></script>
+<script type="module" src="tree-classic.js?v=0.41.0"></script>
+<script type="module" src="minutes.js?v=0.41.0"></script>
+<script type="module" src="users.js?v=0.41.0"></script>
 </body>
 </html>
