@@ -318,7 +318,11 @@ table.roster tbody tr:hover{background:#ecfdf5}
   display:flex;align-items:center;justify-content:flex-start;
   box-shadow:0 1px 1.5px rgba(15,23,42,.05);transition:box-shadow .1s,border-color .1s}
 .ct-box:hover{border-color:#2563eb;box-shadow:0 2px 8px rgba(37,99,235,.2);z-index:5}
-.ct-box.ct-direct{border-color:#10b981;border-width:1.5px;background:#f6fefb}
+.ct-box.ct-dead{background:#d6deea;border-color:#c2cbd6}                 /* 已故=浅灰底 */
+.ct-box.ct-unknown{border-style:dashed;border-color:#cbd5e1}            /* 在世未知=虚线框 */
+.ct-box.ct-direct{border-color:#10b981;border-width:1.6px}             /* 直系=绿边(不填底,与生死底色共存) */
+.ct-leg-dead{background:#d6deea;border:1px solid #c2cbd6;border-radius:3px;padding:0 .25em}
+.ct-leg-unk{border:1px dashed #cbd5e1;border-radius:3px;padding:0 .25em}
 .ct-name{font-size:14px;font-weight:600;letter-spacing:1px}
 .ct-sp{font-size:11.5px;font-weight:500;letter-spacing:1px;opacity:.92}
 .ct-spsep{font-size:5px}                 /* 本人与配偶之间的小竖向间隔(全角空格缩小) */

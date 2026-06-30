@@ -126,9 +126,10 @@ function renderClassicTree(){
     let inner = `<span class="ct-name" style="color:${sexColor(p)}">${esc(p.name || "(无名)")}</span>`;
     ctInnerSpouses(id, F.nodeSet).forEach(s => { const q = byId(s) || {};
       inner += `<span class="ct-spsep">　</span><span class="ct-sp" style="color:${sexColor(q)}">${esc(q.name || "")}</span>`; });
-    const d = el("div", "ct-box" + (DIRECT_LINE.has(id) ? " ct-direct" : ""));
+    const aliveCls = p.alive === "否" ? " ct-dead" : (p.alive === "是" ? "" : " ct-unknown");   // 已故=灰底;在世=白底;未知=虚线框
+    const d = el("div", "ct-box" + (DIRECT_LINE.has(id) ? " ct-direct" : "") + aliveCls);
     d.dataset.pid = id;
-    d.title = (p.name || "") + (p.sex ? (" · " + p.sex) : "");
+    d.title = (p.name || "") + (p.sex ? (" · " + p.sex) : "") + (p.alive === "否" ? " · 已故" : (p.alive === "是" ? " · 在世" : " · 在世未知"));
     d.style.left = boxLeft(id) + "px"; d.style.top = "0px"; d.style.visibility = "hidden";
     d.innerHTML = inner;
     d.onclick = () => { const pp = byId(id); if (pp) openDetail(pp); };
@@ -203,7 +204,7 @@ function ctControlsHtml(famOpts, zoom){
     + `<button class="btn btn-sm" id="ctZoomFit">适应整页</button>`
     + `<button class="btn btn-sm" id="ctZoomReset">100%</button></span>`
     + `<button class="btn btn-sm" id="ctPrint">🖨 打印 / 存 PDF</button>`
-    + `<span class="hint"><b style="color:#1d4ed8">男</b>·<b style="color:#db2777">女</b> 不同色;绿框=本谱直系;点框看详情。</span>`
+    + `<span class="hint"><b style="color:#1d4ed8">男</b>·<b style="color:#db2777">女</b> 不同色;<span class="ct-leg-dead">灰底</span>=已故 · 白底=在世 · <span class="ct-leg-unk">虚线</span>=未知;绿框=直系;点框看详情。</span>`
     + `</div>`;
 }
 function ctHeaderHtml(LIN, F){
