@@ -60,7 +60,8 @@ async function signedDownload(env, path, expiresIn) {
   const d = await r.json(); return STORAGE + d.signedURL;   // signedURL 形如 /object/sign/recordings/<path>?token=...
 }
 async function signedUpload(env, path) {
-  const r = await fetch(STORAGE + "/object/upload/sign/" + BUCKET + "/" + path, { method: "POST", headers: svcHeaders(env) });
+  // 必带 body(哪怕空 {}):content-type=application/json 却无 body 时,storage 解析空体会 400(→502)。
+  const r = await fetch(STORAGE + "/object/upload/sign/" + BUCKET + "/" + path, { method: "POST", headers: svcHeaders(env), body: JSON.stringify({}) });
   if (!r.ok) { const e = new Error("UPLOADSIGN"); e.status = 502; throw e; }
   const d = await r.json();   // { url: "/object/upload/sign/recordings/<path>?token=..." }
   const token = (String(d.url || "").split("token=")[1] || "").split("&")[0];
