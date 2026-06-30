@@ -6,9 +6,10 @@
 | | |
 |---|---|
 | **产品名** | 关系图谱（品牌固定常量 `APP_NAME`；本质=人物关系图谱，由《孙氏族谱》东北一脉演化而来，已泛化为不限一族一姓的属性图工具，仍能当家谱用） |
-| **当前版本** | v0.31.0 |
+| **当前版本** | v0.32.0 |
 | **最近更新** | 2026-06-30 |
 | **技术栈** | 纯静态 vanilla JS（无构建、纯 ESM + CDN）+ Cloudflare Pages + Supabase(Postgres/Auth/Storage) + CF Pages Functions(代理 AI) |
+| **前端文件** | `app.js`(核心:state/helpers/render*/CRUD/详情/编辑/boot,~1300行)、`tools-dates-import-ai.js`(日期规范化+表格导入+AI批量)、`tools-spouse.js`(配偶 blob 转边)、`db.js`(数据层)、`calendar.js`(万年历)。**模块加载顺序**:db→app→calendar→tools-*(tools 在 app 之后,app 末尾把核心符号挂 window 供其裸引用)。改版本必须同步改 `index.html` 全部 `?v=`。 |
 | **线上** | https://sun-zupu-cloud.pages.dev ｜ Supabase ref `ktalsyrxueabdisrszde`(新加坡) |
 | **维护说明** | 本规格描述"系统能做什么"(功能/数据契约/安全模型)；操作手册见各项目 USAGE 约定；backlog 见 `../待做功能清单.md`。 |
 
@@ -176,3 +177,4 @@ GET `/api/{meta,persons,trash,narratives,verify,transcription,history,backups,au
 ## 变更记录（由 /zupu-spec-sync 追加）
 
 - **2026-06-30 v0.31.0**：修导出/备份取数 bug(`fullData` 误取回收站→改 `listAllPersons` 全量)；GEDCOM/分享 HTML 改读 father 边(找回 15 条父子链)；删关系边存 before 并纳入可撤销(改父亲可撤)；reconcileFatherEdge 不再静默吞错；导入止血(预分配号段 `allocIds` + 并发池);全量读取加 `selectAll` 分页防 1000 行截断。首版 FEATURES.md。
+- **2026-06-30 v0.32.0**：app.js 模块化(零构建)——把「配偶 blob 转边」抽到 `tools-spouse.js`、「日期规范化+表格导入+AI批量」抽到 `tools-dates-import-ai.js`;app.js 1934→~1300 行。机制:app.js 末尾把核心符号挂 window,工具模块裸引用经全局对象解析、并把自己公开函数+事件绑定挂回 window。函数体零改写。浏览器实测全过(登录/渲染/导入·AI·日期规范化·配偶转换 各入口零报错)。
