@@ -319,9 +319,9 @@ table.roster tbody tr:hover{background:#ecfdf5}
   box-shadow:0 1px 1.5px rgba(15,23,42,.05);transition:box-shadow .1s,border-color .1s}
 .ct-box:hover{border-color:#2563eb;box-shadow:0 2px 8px rgba(37,99,235,.2);z-index:5}
 .ct-box.ct-direct{border-color:#10b981;border-width:1.6px}             /* 直系=绿边(不填底) */
-/* 已故=只在该人名字旁描一条竖线(竖排下 underline 即落在字侧成竖线);不动整框、夫妻各自判定 */
-.ct-gone{text-decoration:underline;text-decoration-color:#334155;text-decoration-thickness:2px;text-underline-offset:3px}
-.ct-leg-gone{text-decoration:underline;text-decoration-color:#334155;text-decoration-thickness:2px;text-underline-offset:2px}
+/* 已故=该人名字外加"牌位"框(细框+浅灰底);名字仍按性别上色;在世者素名无框;夫妻一存一殁各自判定 */
+.ct-gone{background:#dce3ed;border:1px solid #aeb9c8;border-radius:4px;padding:3px 2px;box-decoration-break:clone}
+.ct-leg-gone{background:#dce3ed;border:1px solid #aeb9c8;border-radius:3px;padding:0 .3em}
 .ct-name{font-size:14px;font-weight:600;letter-spacing:1px}
 .ct-sp{font-size:11.5px;font-weight:500;letter-spacing:1px;opacity:.92}
 .ct-spsep{font-size:5px}                 /* 本人与配偶之间的小竖向间隔(全角空格缩小) */
