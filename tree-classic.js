@@ -40,9 +40,10 @@ function buildClassicForest(LIN){
     const m = state.motherOf[id]; if (nodeSet.has(m)) return m;
     return null;
   };
+  const sexRank = p => p.sex === "男" ? 0 : (p.sex === "女" ? 1 : 2);   // 同辈:男前 女后 性别未知最后
   const sortKey = id => {
     const p = byId(id) || {}; const g = genOf(id); const so = parseInt(p.sort_order, 10); const yrm = (p.birth || "").match(/\d{4}/);
-    return [g == null ? 9999 : g, isNaN(so) ? 0 : so, yrm ? +yrm[0] : 9999, id];
+    return [g == null ? 9999 : g, sexRank(p), yrm ? +yrm[0] : 9999, isNaN(so) ? 0 : so, id];   // 世代→性别(男前女后)→出生年(长幼)→手排号→ID
   };
   const cmp = (a, b) => { const ka = sortKey(a), kb = sortKey(b);
     for (let i = 0; i < ka.length; i++){ if (ka[i] < kb[i]) return -1; if (ka[i] > kb[i]) return 1; } return 0; };
@@ -105,45 +106,73 @@ function renderClassicTree(){
     return;
   }
 
+  // ---- 主树世代行(只含连通节点)----
   const bands = [...new Set(F.nodes.map(id => F.band[id]))].sort((a, b) => a - b);
-  const cx = id => CT.GUTTER_W + CT.PAD_L + F.X[id] * CT.COL + CT.BOX_W / 2;
+
+  // ---- 待接续(无父子连接的本族成员):右侧一个【紧凑面板】,按世代分小行、挨在一起(不随主树世代行铺开,免得太散)----
+  const ORPHAN_GAP = 2;                                  // 主树与右侧面板之间留的列数
+  const rightBase = F.leafCount + ORPHAN_GAP;
+  const orphanCol = {};                                  // orphan -> 面板内列号
+  const orphanGroups = [];                               // [{gen, ids}] 按世代,每世代一紧凑行
+  if (F.orphans.length){
+    const osex = id => { const s = (byId(id) || {}).sex; return s === "男" ? 0 : (s === "女" ? 1 : 2); };
+    const oyr = id => { const m = ((byId(id) || {}).birth || "").match(/\d{4}/); return m ? +m[0] : 9999; };
+    const byG = {};
+    F.orphans.forEach(o => { const g = genOf(o); const k = (g == null ? 9999 : g); (byG[k] = byG[k] || []).push(o); });
+    Object.keys(byG).map(Number).sort((a, b) => a - b).forEach(gk => {
+      const ids = byG[gk].sort((a, c) => osex(a) - osex(c) || oyr(a) - oyr(c) || (a < c ? -1 : a > c ? 1 : 0));
+      ids.forEach((o, i) => { orphanCol[o] = i; });
+      orphanGroups.push({ gen: gk, ids });
+    });
+  }
+  const isOrphan = id => orphanCol[id] !== undefined;
+  const xOf = id => isOrphan(id) ? (rightBase + orphanCol[id]) : F.X[id];
+  const drawn = F.nodes.concat(F.orphans);
+  const maxOCol = F.orphans.length ? Math.max(...F.orphans.map(o => orphanCol[o])) : 0;
+  const maxX = Math.max(F.leafCount - 1, F.orphans.length ? (rightBase + maxOCol) : 0);
+  const cx = id => CT.GUTTER_W + CT.PAD_L + xOf(id) * CT.COL + CT.BOX_W / 2;
   const boxLeft = id => cx(id) - CT.BOX_W / 2;
-  const totalW = CT.GUTTER_W + CT.PAD_L * 2 + (F.leafCount > 0 ? (F.leafCount - 1) : 0) * CT.COL + CT.BOX_W;
+  const totalW = CT.GUTTER_W + CT.PAD_L * 2 + maxX * CT.COL + CT.BOX_W;
 
   // 1) 注入外壳(含可滚动容器),稍后填内容
   box.innerHTML = ctControlsHtml(famOpts, 1)
     + ctHeaderHtml(LIN, F)
-    + `<div class="ct-scroll"><div class="ct-wrap"><div class="ct-canvas" style="width:${totalW}px"></div></div></div>`
-    + ctAppendixHtml(F);
+    + `<div class="ct-scroll"><div class="ct-wrap"><div class="ct-canvas" style="width:${totalW}px"></div></div></div>`;
   const scroll = box.querySelector(".ct-scroll");
   const wrap = box.querySelector(".ct-wrap");
   const canvas = box.querySelector(".ct-canvas");
 
-  // 2) 建竖排框(先 top=0、隐藏待测)
-  const nodeEls = {};
+  // 2) 建竖排框(连通节点 + 右侧待接续;先 top=0、隐藏待测)
+  const els = {};
   const goneCls = pp => (pp && pp.alive === "否") ? " ct-gone" : "";   // 已故=该人名字外加"牌位"框(框+浅灰底;不动整框、夫妻一存一殁只标殁者)
-  F.nodes.forEach(id => {
+  drawn.forEach(id => {
     const p = byId(id) || {};
-    let inner = `<span class="ct-name${goneCls(p)}" style="color:${sexColor(p)}">${esc(p.name || "(无名)")}</span>`;
+    // 每个名字 span 带 data-pid → 悬浮显示该人主要信息;点该名字开该人详情(配偶名亦然)
+    let inner = `<span class="ct-name${goneCls(p)}" data-pid="${esc(id)}" style="color:${sexColor(p)}">${esc(p.name || "(无名)")}</span>`;
     ctInnerSpouses(id, F.nodeSet).forEach(s => { const q = byId(s) || {};
-      inner += `<span class="ct-spsep">　</span><span class="ct-sp${goneCls(q)}" style="color:${sexColor(q)}">${esc(q.name || "")}</span>`; });
-    const d = el("div", "ct-box" + (DIRECT_LINE.has(id) ? " ct-direct" : ""));
+      inner += `<span class="ct-spsep">　</span><span class="ct-sp${goneCls(q)}" data-pid="${esc(s)}" style="color:${sexColor(q)}">${esc(q.name || "")}</span>`; });
+    const d = el("div", "ct-box" + (DIRECT_LINE.has(id) ? " ct-direct" : "") + (isOrphan(id) ? " ct-orphanbox" : ""));
     d.dataset.pid = id;
-    d.title = (p.name || "") + (p.sex ? (" · " + p.sex) : "") + (p.alive === "否" ? " · 已故" : (p.alive === "是" ? " · 在世" : " · 在世未知"));
     d.style.left = boxLeft(id) + "px"; d.style.top = "0px"; d.style.visibility = "hidden";
     d.innerHTML = inner;
-    d.onclick = () => { const pp = byId(id); if (pp) openDetail(pp); };
-    canvas.appendChild(d); nodeEls[id] = d;
+    d.onclick = (e) => { const sp = e.target.closest && e.target.closest("[data-pid]"); const pp = byId(sp ? sp.dataset.pid : id); if (pp) openDetail(pp); };
+    canvas.appendChild(d); els[id] = d;
   });
+  ctAttachTips(canvas);   // 名字悬浮提示(主要信息)
 
-  // 3) 测高 → 逐代行高 → 行顶
-  const boxH = {}; F.nodes.forEach(id => boxH[id] = nodeEls[id].offsetHeight || 40);
-  const bandH = {}; bands.forEach(b => bandH[b] = Math.max(...F.nodes.filter(id => F.band[id] === b).map(id => boxH[id])));
+  // 3) 测高(节点+待接续)→ 主树逐代行高/行顶 + 待接续紧凑面板(各世代一行、行间紧挨,独立于主树行)
+  const boxH = {}; drawn.forEach(id => boxH[id] = els[id].offsetHeight || 40);
+  const bandH = {}; bands.forEach(b => bandH[b] = Math.max(40, ...F.nodes.filter(id => F.band[id] === b).map(id => boxH[id])));
   const rowTop = {}; let acc = CT.HEADER_H;
   bands.forEach(b => { rowTop[b] = acc; acc += bandH[b] + CT.ROW_GAP; });
-  const totalH = acc;
-  const topOf = id => rowTop[F.band[id]];
-  const botOf = id => rowTop[F.band[id]] + boxH[id];
+  const mainBottom = acc;
+  const ORPHAN_TOP = CT.HEADER_H + 24;                   // 面板从标题下方开始
+  const orphanTop = {}; const orphanRows = []; let oacc = ORPHAN_TOP;
+  orphanGroups.forEach(grp => { const h = Math.max(40, ...grp.ids.map(id => boxH[id]));
+    grp.ids.forEach(o => { orphanTop[o] = oacc; }); orphanRows.push({ gen: grp.gen, top: oacc, h }); oacc += h + 16; });
+  const totalH = Math.max(mainBottom, oacc);
+  const topOf = id => isOrphan(id) ? orphanTop[id] : rowTop[F.band[id]];
+  const botOf = id => topOf(id) + boxH[id];
 
   // 4) 缩放:默认整页可见(state.classicZoom==null 即自动适应);否则用用户设定值
   const availW = (scroll ? scroll.clientWidth : box.clientWidth || 900) - 10;
@@ -153,26 +182,34 @@ function renderClassicTree(){
   state._classicZoomEff = zoom;
 
   // 5) 定位框
-  F.nodes.forEach(id => { const d = nodeEls[id]; d.style.top = topOf(id) + "px"; d.style.visibility = ""; });
+  drawn.forEach(id => { const d = els[id]; d.style.top = topOf(id) + "px"; d.style.visibility = ""; });
 
-  // 6) 连线(父框底→子女总线→各子框顶)
+  // 6) 连线(仅连通节点;待接续无连线)
   let paths = "";
   F.nodes.forEach(pid => {
     const kids = F.children[pid] || []; if (!kids.length) return;
     const pb = botOf(pid), px = cx(pid);
     const tops = kids.map(topOf); const busY = Math.min(...tops) - Math.min(CT.ROW_GAP * 0.55, 16);
-    const kxs = kids.map(cx); const minX = Math.min(...kxs), maxX = Math.max(...kxs);
+    const kxs = kids.map(cx); const minKX = Math.min(...kxs), maxKX = Math.max(...kxs);
     paths += `<path d="M ${px} ${pb} L ${px} ${busY}"/>`;
-    if (kids.length > 1) paths += `<path d="M ${minX} ${busY} L ${maxX} ${busY}"/>`;
+    if (kids.length > 1) paths += `<path d="M ${minKX} ${busY} L ${maxKX} ${busY}"/>`;
     kids.forEach((k, i) => { paths += `<path d="M ${kxs[i]} ${busY} L ${kxs[i]} ${tops[i]}"/>`; });
   });
 
-  // 7) 世代栏(左)+ 行分隔
+  // 7) 世代栏(左)+ 行分隔 + 右侧待接续紧凑面板(标题 + 每世代小标签 + 分隔竖线)
   let gutter = "";
   bands.forEach(b => { const top = rowTop[b], h = bandH[b]; const cg = ctDominantCharGen(F, b);
     gutter += `<div class="ct-gut" style="top:${top}px;height:${h}px"><div class="ct-gut-gen">${b}世</div>${cg ? `<div class="ct-gut-cg">${esc(cg)}</div>` : ""}</div>`;
     gutter += `<div class="ct-band-line" style="top:${top + h + CT.ROW_GAP / 2}px;width:${totalW}px"></div>`;
   });
+  if (F.orphans.length){
+    const divX = CT.GUTTER_W + CT.PAD_L + (F.leafCount - 0.5 + ORPHAN_GAP / 2) * CT.COL;
+    const panelL = CT.GUTTER_W + CT.PAD_L + rightBase * CT.COL - CT.BOX_W / 2;
+    gutter += `<div class="ct-orphan-divider" style="left:${divX}px;height:${totalH}px"></div>`;
+    gutter += `<div class="ct-orphan-tag" style="left:${panelL}px;top:${CT.HEADER_H - 2}px">待接续 ${F.orphans.length} <span class="ct-orphan-tag-sub">无父子连接</span></div>`;
+    orphanRows.forEach(r => { const lab = (r.gen === 9999) ? "未定" : (r.gen + "世");
+      gutter += `<div class="ct-orphan-rowlab" style="left:${panelL - 30}px;top:${r.top + 4}px">${esc(lab)}</div>`; });
+  }
 
   // 8) 组装:svg 底层、gutter 其次、框最上;canvas 用 transform 缩放,wrap 收缩到缩放后尺寸以正确滚动
   canvas.insertAdjacentHTML("afterbegin", `<svg class="ct-lines" width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}">${paths}</svg>`);
@@ -183,10 +220,46 @@ function renderClassicTree(){
   if (scroll) scroll.style.maxHeight = Math.round(window.innerHeight * 0.74) + "px";
 
   const zv = $("#ctZoomVal"); if (zv) zv.textContent = Math.round(zoom * 100) + "%";
-  box.querySelectorAll(".ct-orphan").forEach(a => a.onclick = () => { const p = byId(a.dataset.pid); if (p) openDetail(p); });
   ctBindControls();
 }
 
+// ---- 名字悬浮提示:鼠标移到名字上显示该人主要信息(姓名/性别/世代/生卒/在世/籍居/配偶/职业等)----
+function ctTipEl(){ let t = document.getElementById("ctTip"); if (!t){ t = el("div"); t.id = "ctTip"; document.body.appendChild(t); } return t; }
+function ctTipHtml(p){
+  const e = esc, g = genOf(p.id);
+  const clean = x => (x && x !== "无考") ? String(x).replace(/[()（）]/g, "").trim() : "";
+  const bb = clean(p.birth), dd = clean(p.death);
+  const yrs = (bb && dd) ? (bb + "–" + dd) : (bb || (dd ? "–" + dd : ""));   // 生卒(无 ctYears 助手,内联)
+  const cg = (p.char_gen && p.char_gen !== "—") ? ` · ${e(p.char_gen)}字辈` : "";
+  const alive = p.alive === "否" ? "已故" : (p.alive === "是" ? "在世" : "在世未知");
+  const sps = (state.spouseOf[p.id] || []).map(s => byId(s)).filter(x => x && !x.deleted).map(x => x.name).filter(Boolean);
+  const rows = [`<div class="ct-tip-name" style="color:${sexColor(p)}">${e(p.name || "(无名)")}<span class="ct-tip-sub">${e(p.sex || "")}${cg}</span></div>`];
+  const l2 = [(g == null ? "" : "第" + g + "世"), yrs, alive].filter(Boolean).join("　·　");
+  if (l2) rows.push(`<div class="ct-tip-row">${e(l2)}</div>`);
+  if (p.birth_place) rows.push(`<div class="ct-tip-row">籍 ${e(p.birth_place)}</div>`);
+  if (p.residence) rows.push(`<div class="ct-tip-row">居 ${e(p.residence)}</div>`);
+  if (p.occupation) rows.push(`<div class="ct-tip-row">${e(p.occupation)}</div>`);
+  if (sps.length) rows.push(`<div class="ct-tip-row">配偶:${e(sps.join("、"))}</div>`);
+  if (p.deeds) rows.push(`<div class="ct-tip-row ct-tip-soft">${e(p.deeds.slice(0, 48))}${p.deeds.length > 48 ? "…" : ""}</div>`);
+  rows.push(`<div class="ct-tip-row ct-tip-hint">点名字看完整详情</div>`);
+  return rows.join("");
+}
+function ctAttachTips(canvas){
+  if (!canvas) return; const tip = ctTipEl();
+  const hide = () => { tip.style.display = "none"; };
+  canvas.addEventListener("mousemove", e => {
+    const span = e.target.closest && e.target.closest(".ct-name[data-pid],.ct-sp[data-pid]");
+    if (!span){ hide(); return; }
+    const p = byId(span.dataset.pid); if (!p){ hide(); return; }
+    tip.innerHTML = ctTipHtml(p); tip.style.display = "block";
+    const pad = 14, vw = window.innerWidth, vh = window.innerHeight, w = tip.offsetWidth, h = tip.offsetHeight;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + w > vw - 6) x = e.clientX - w - pad; if (x < 6) x = 6;
+    if (y + h > vh - 6) y = vh - h - 6; if (y < 6) y = 6;
+    tip.style.left = x + "px"; tip.style.top = y + "px";
+  });
+  canvas.addEventListener("mouseleave", hide);
+}
 function famCfgLabel(name){ try { const f = ((state.meta && state.meta.families) || {})[name]; return f && f.label; } catch (e){ return null; } }
 function ctDominantCharGen(F, b){
   const cnt = {};
@@ -204,6 +277,7 @@ function ctControlsHtml(famOpts, zoom){
     + `<button class="btn btn-sm" id="ctZoomIn">＋</button>`
     + `<button class="btn btn-sm" id="ctZoomFit">适应整页</button>`
     + `<button class="btn btn-sm" id="ctZoomReset">100%</button></span>`
+    + `<button class="btn btn-sm" id="ctFull">${document.fullscreenElement ? "⛶ 退出全屏" : "⛶ 全屏"}</button>`
     + `<button class="btn btn-sm" id="ctPrint">🖨 打印 / 存 PDF</button>`
     + `<span class="hint"><b style="color:#1d4ed8">男</b>·<b style="color:#db2777">女</b> 不同色;<span class="ct-leg-gone">名字加框</span>=已故;绿框=直系;点框看详情。</span>`
     + `</div>`;
@@ -245,6 +319,18 @@ function ctBindControls(){
     try { await reloadPersons(); await refreshRelCount(); } catch (e) {}
     renderClassicTree();   // 重画时会重建控件,rf 引用失效;无需手动恢复
   };
+  const ff = $("#ctFull"); if (ff) ff.onclick = () => {   // 全屏显示谱图(浏览器全屏 API,作用于 #treeBox)
+    const box = $("#treeBox");
+    if (document.fullscreenElement) { if (document.exitFullscreen) document.exitFullscreen(); }
+    else if (box && box.requestFullscreen) box.requestFullscreen().catch(() => {});
+  };
+  if (!window._ctFsBound) {   // 进/出全屏后按新视口重算"适应整页"并重画(仅绑一次)
+    window._ctFsBound = true;
+    document.addEventListener("fullscreenchange", () => {
+      const v = document.getElementById("view-tree");
+      if (v && v.classList.contains("active") && (state.treeMode || "classic") === "classic") renderClassicTree();
+    });
+  }
 }
 
 Object.assign(window, { renderClassicTree, buildClassicForest });

@@ -332,12 +332,33 @@ table.roster tbody tr:hover{background:#ecfdf5}
 .ct-name{font-size:14px;font-weight:600;letter-spacing:1px}
 .ct-sp{font-size:11.5px;font-weight:500;letter-spacing:1px;opacity:.92}
 .ct-spsep{font-size:5px}                 /* 本人与配偶之间的小竖向间隔(全角空格缩小) */
+.ct-name[data-pid],.ct-sp[data-pid]{cursor:pointer}
+/* 名字悬浮提示卡(主要信息) */
+#ctTip{position:fixed;z-index:9999;display:none;pointer-events:none;max-width:248px;
+  writing-mode:horizontal-tb;text-orientation:mixed;text-align:left;
+  background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 6px 20px rgba(15,23,42,.18);
+  padding:.5rem .7rem;font-size:.82rem;line-height:1.55;color:#334155}
+.ct-tip-name{font-weight:700;font-size:.98rem;margin-bottom:.15rem}
+.ct-tip-sub{font-weight:400;color:#94a3b8;font-size:.78rem;margin-left:.35em}
+.ct-tip-row{color:#475569}
+.ct-tip-soft{color:#64748b;font-size:.78rem}
+.ct-tip-hint{color:#cbd5e1;font-size:.72rem;margin-top:.2rem}
 .ct-appendix{margin-top:.7rem;border:1px solid var(--line);border-radius:var(--r-md);background:#fffdf7;padding:.5rem .8rem}
 .ct-appendix-h{font-weight:600;color:#92400e;cursor:pointer;font-size:.92rem}
 .ct-orphan-row{margin:.3rem 0;font-size:.9rem;line-height:1.7}
 .ct-orphan-gen{display:inline-block;min-width:4.5em;color:#64748b;font-size:.8rem}
 .ct-orphan{cursor:pointer;text-decoration:none;font-weight:500}
 .ct-orphan:hover{text-decoration:underline}
+/* 右侧"待接续"(无父子连接)浮框:虚线框区别于连通节点 */
+.ct-box.ct-orphanbox{border-style:dashed;border-color:#cbd5e1;background:#fcfcfd}
+.ct-orphan-divider{position:absolute;top:0;width:0;border-left:2px dashed #d8dee7;z-index:1}
+.ct-orphan-tag{position:absolute;z-index:4;writing-mode:horizontal-tb;white-space:nowrap;font-size:11px;font-weight:600;
+  color:#92400e;background:#fffdf7;border:1px solid #f0e6d2;border-radius:5px;padding:1px 6px}
+.ct-orphan-tag-sub{color:#b0a48a;font-weight:400;font-size:9px;margin-left:.25em}
+.ct-orphan-rowlab{position:absolute;z-index:4;writing-mode:horizontal-tb;font-size:10px;color:#94a3b8;white-space:nowrap}
+/* 全屏显示谱图(浏览器全屏 API 作用于 #treeBox) */
+#treeBox:fullscreen{background:#fafbfc;padding:.8rem 1rem;overflow:auto}
+#treeBox:-webkit-full-screen{background:#fafbfc;padding:.8rem 1rem;overflow:auto}
 /* 打印 / 存 PDF:只留谱图,去掉页面其余 chrome */
 @media print{
   body.ct-printing header,body.ct-printing .ct-controls,body.ct-printing .ct-appendix,
