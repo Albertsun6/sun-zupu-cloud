@@ -48,7 +48,11 @@ create index if not exists rel_type_idx on public.relationships(type);
 create unique index if not exists rel_uniq on public.relationships(from_id,to_id,type); -- 同对人+同类型防重
 
 -- 3) 双向视图:对称边展开成两向,前端/查询统一从 from 出发
-create or replace view public.relationships_bidir as
+--    security_invoker=true:视图按【查询者】权限跑、尊重 relationships 的 RLS。
+--    否则视图以创建者(postgres)权限跑 = 绕过 RLS,anon 仅凭 anon key 即可经视图读到全部关系边
+--    (Supabase linter「Security Definer View」CRITICAL;2026-07-01 实测确为真泄露,本视图前端未用)。
+create or replace view public.relationships_bidir
+  with (security_invoker = true) as
   select id, from_id, to_id, type, directed, start_date, end_date, note from public.relationships
   union all
   select id, to_id as from_id, from_id as to_id, type, directed, start_date, end_date, note
