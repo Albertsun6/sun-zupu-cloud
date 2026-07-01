@@ -58,7 +58,9 @@ create or replace view public.relationships_bidir
   select id, to_id as from_id, from_id as to_id, type, directed, start_date, end_date, note
   from public.relationships where directed = false;
 
--- 4) RLS(对齐 policies.sql:authenticated 读、app_metadata.role='editor' 写)
+-- 4) RLS(对齐 policies.sql:authenticated 读、can_write()=role∈{editor,admin} 写)
+--    历史坑:此处曾硬编码 ='editor',v0.41 引入 admin 超级角色后漂移——admin 能写 persons 却写不了
+--    relationships,「新建人物并连上」建了孤儿人物却连不上边(2026-07-01 修)。改用 policies.sql 的 can_write()。
 alter table public.relationships      enable row level security;
 alter table public.relationship_types enable row level security;
 drop policy if exists "rel read"  on public.relationships;
@@ -67,12 +69,12 @@ drop policy if exists "rt read"   on public.relationship_types;
 drop policy if exists "rt write"  on public.relationship_types;
 create policy "rel read"  on public.relationships      for select to authenticated using (true);
 create policy "rel write" on public.relationships      for all to authenticated
-  using ((auth.jwt() #>> '{app_metadata,role}') = 'editor')
-  with check ((auth.jwt() #>> '{app_metadata,role}') = 'editor');
+  using (public.can_write())
+  with check (public.can_write());
 create policy "rt read"   on public.relationship_types for select to authenticated using (true);
 create policy "rt write"  on public.relationship_types for all to authenticated
-  using ((auth.jwt() #>> '{app_metadata,role}') = 'editor')
-  with check ((auth.jwt() #>> '{app_metadata,role}') = 'editor');
+  using (public.can_write())
+  with check (public.can_write());
 
 -- 5) 迁移:每条非空且非悬空的 father_id → 一条有向 father 边(from=父, to=子)
 --    跳过悬空父(=数据体检查的那种);father_id 列保留对照,不删。
