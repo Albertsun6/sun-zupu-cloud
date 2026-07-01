@@ -6,10 +6,10 @@
 | | |
 |---|---|
 | **产品名** | 关系图谱（品牌固定常量 `APP_NAME`；本质=人物关系图谱，由《孙氏族谱》东北一脉演化而来，已泛化为不限一族一姓的属性图工具，仍能当家谱用） |
-| **当前版本** | v0.41.0 |
-| **最近更新** | 2026-06-30 |
+| **当前版本** | v0.42.0 |
+| **最近更新** | 2026-07-01 |
 | **技术栈** | 纯静态 vanilla JS（无构建、纯 ESM + CDN）+ Cloudflare Pages + Supabase(Postgres/Auth/Storage) + CF Pages Functions(代理 AI / 录音转写 / 用户管理) |
-| **前端文件** | `app.js`(核心:state/helpers/render*/CRUD/详情/编辑/boot+权限门禁,~1300行)、`tools-dates-import-ai.js`(日期规范化+表格导入+AI批量)、`tools-spouse.js`(配偶 blob 转边)、`tree-classic.js`(传统谱图挂图渲染)、`minutes.js`(纪要:录音/转写/AI整理,v0.41)、`users.js`(用户管理,admin,v0.41)、`db.js`(数据层)、`calendar.js`(万年历)。**模块加载顺序**:db→app→calendar→tools-*→tree-classic→minutes→users(均在 app 之后,app 末尾把核心符号挂 window 供其裸引用)。改版本必须同步改 `index.html` 全部 `?v=`。 |
+| **前端文件** | `app.js`(核心:state/helpers/render*/CRUD/详情/编辑/boot+权限门禁,~1300行)、`tools-dates-import-ai.js`(日期规范化+表格导入+AI批量)、`tools-spouse.js`(配偶 blob 转边)、`tree-classic.js`(传统谱图挂图渲染)、`minutes.js`(纪要:录音/转写/AI整理,v0.41;v0.42 分段长录音+崩溃恢复)、`users.js`(用户管理,admin,v0.41)、`db.js`(数据层)、`calendar.js`(万年历)。**模块加载顺序**:db→app→calendar→tools-*→tree-classic→minutes→users(均在 app 之后,app 末尾把核心符号挂 window 供其裸引用)。改版本必须同步改 `index.html` 全部 `?v=`。 |
 | **线上** | https://sun-zupu-cloud.pages.dev ｜ Supabase ref `ktalsyrxueabdisrszde`(新加坡) |
 | **维护说明** | 本规格描述"系统能做什么"(功能/数据契约/安全模型)；操作手册见各项目 USAGE 约定；backlog 见 `../待做功能清单.md`。 |
 
@@ -105,13 +105,13 @@
 - **相册**(`renderMedia/uploadMedia`)：上传(前端压缩≤1600px JPEG)、设主图、改说明、删除。
 - **智能关系联动**：加孩子→fail-closed 推定另一方父母(唯一确定才自动，否则人审)；加配偶→建议补录其已有子女(默认不勾)。
 
-### 2.11 纪要（`minutes.js`，v0.41，权限门:`canMinutes`)— NotebookLM 式录音笔记
+### 2.11 纪要（`minutes.js`，v0.41；长录音 v0.42，权限门:`canMinutes`)— NotebookLM 式录音笔记
 - **访问控制**：标签仅当 `role=admin 或 perms 含 minutes` 时展示;无权者连菜单都看不到(RLS + CF 函数各自再校验,非仅前端隐藏)。
 - **列表/新建**:列表显 标题/会议时间(`meeting_at` 备注)/状态/时长/创建人;新建填 标题+会议时间+备注。
-- **录音**:① 浏览器麦克风 `MediaRecorder`(单声道、计时、停止;**格式优先 mp4/AAC,浏览器只支持 webm 时回退 Web Audio 采 PCM 编码 WAV-16k 单声道**——保证阿里 Fun-ASR 能识别;接近 2h 自动停);② 上传已有音频(mp3/m4a/wav/aac…)。录音存**私有桶 `recordings`**,经 CF 签名上传 URL 直传,**永久保留**。
-- **转写**(阿里 Fun-ASR 异步):点「开始转写」→ 提交 → 前端轮询(关页面/刷新可据持久状态续轮)→ 完成显示**带时间戳 + 说话人分离**的分段(点段跳播放音频)。
+- **录音(v0.42 长录音,扛数小时)**:① 浏览器麦克风 `MediaRecorder`(单声道、计时、停止;**低码率 `audioBitsPerSecond:32000`** 压体积;**格式优先 mp4/AAC,回退 webm/opus,都不支持才 Web Audio 采 PCM 编码 WAV-16k**;5h 安全上限自动停);录音**边录边分段即传**(`mr.start(180000)` 每 3 分钟一片 → `seg-url` 签名直传私有桶作**崩溃兜底**),**停止时前端把内存里同源分片拼成整场单文件**上传,attach 后清理分片。② 上传已有音频(mp3/m4a/wav/aac…)。③ **崩溃恢复**:录到一半页面崩了(有分片台账、无整场文件)→ 详情显「恢复并保存整场」→ `seg-list` 下载分片按序重拼上传(时长按段数×180 估算)。录音存**私有桶 `recordings`**(单文件上限 200MB),经 CF 签名上传 URL 直传,**永久保留**。
+- **转写**(阿里 Fun-ASR 异步):点「开始转写」→ 提交 → 前端轮询(关页面/刷新可据持久状态续轮)→ 完成显示**带时间戳 + 说话人分离**的分段(点段跳播放音频)。**说话人分离按时长开关(v0.42)**:`duration_sec≤2h` 开分离;`>2h` 关分离(Fun-ASR 开分离仅 ≤2h,关分离可 ≤12h)→ 只出文字、详情提示"未做说话人分离"。
 - **AI 整理**(DeepSeek):**摘要**(结构化,可标"谁第几分钟说")/ **任务**(JSON 清单)/ **脑图**(mermaid `mindmap`,复用 mermaid 懒加载渲染)。
-- 关键文件/函数:`minutes.js`(`renderMinutes/openMinuteDetail/startRecording/makeWavRecorder/uploadAndAttach/doTranscribe/startPolling/genAI/drawMindmap`)、`window.MINUTES`(db.js)、`functions/api/minutes.js`(见 §4.1)。
+- 关键文件/函数:`minutes.js`(`renderMinutes/openMinuteDetail/startRecording/pickMime/mimeExt/makeWavRecorder/stopRecording/uploadAndAttach/recoverRecording/doTranscribe/startPolling/genAI/drawMindmap`)、`window.MINUTES`(db.js:含 `segUpload/segList`)、`functions/api/minutes.js`(见 §4.1)。
 
 ### 2.12 用户管理（`users.js`，v0.41，权限门:`isAdmin`)— 完整自助
 - **访问控制**:标签仅 admin 可见。
@@ -124,7 +124,7 @@
 ## 3. 数据契约
 
 ### 3.1 表（11 张业务表）
-`persons`(节点，id=TEXT `S###`)、`relationships`(边)、`relationship_types`(类型字典，预置 9 类)、`marriages`(自由文本婚姻，与 spouse 边并存)、`media`(相册)、`narratives`(家史)、`verify`(待核实)、`transcription`(p1-4 誊录)、`meta`(单行 jsonb 谱头)、`history`(留痕)、**`minutes`**(纪要,v0.41:`title/meeting_at/note/status/audio_path/audio_mime/audio_size/duration_sec/asr_task_id/asr_error/transcript/transcript_json(分段jsonb)/summary/tasks(jsonb)/mindmap/created_by/created_by_email`;触发器强制作者+守卫受控列,见 §3.5)。字段细节见 `supabase/schema.sql` + `relationships.sql` + `minutes.sql`。
+`persons`(节点，id=TEXT `S###`)、`relationships`(边)、`relationship_types`(类型字典，预置 9 类)、`marriages`(自由文本婚姻，与 spouse 边并存)、`media`(相册)、`narratives`(家史)、`verify`(待核实)、`transcription`(p1-4 誊录)、`meta`(单行 jsonb 谱头)、`history`(留痕)、**`minutes`**(纪要,v0.41:`title/meeting_at/note/status/audio_path/audio_mime/audio_size/duration_sec/asr_task_id/asr_error/transcript/transcript_json(分段jsonb)/summary/tasks(jsonb)/mindmap/created_by/created_by_email`;**v0.42 加 `diarized`(本次转写是否带说话人分离)/`segment_count`(边录边传的分段数,单调不回退)**;触发器强制作者+守卫受控列,见 §3.5)、**`minute_segments`**(v0.42 分段台账,崩溃兜底:`minute_id/seq/object_path/size`,`unique(minute_id,seq)`,`on delete cascade`;仅 CF service_role 写,`can_minutes()` 可读)。字段细节见 `supabase/schema.sql` + `relationships.sql` + `minutes.sql` + `minutes-v042.sql`。
 
 ### 3.2 退役列（只停用，绝不 DROP）
 `gen`(降级为可选世代锚点) `kind` `mother` `rank` `relation_type` `father_note` `spouse`(详情页只读"原始记载") `father_id`。仍在 `EDITABLE`/CSV 列，`updatePerson` 是部分 patch → 零丢失、可回滚。**新功能不写这些列。**
@@ -134,12 +134,13 @@ GET `/api/{meta,persons,trash,narratives,verify,transcription,history,backups,au
 **关系 CRUD 不走 shim，走 `window.REL`。**
 
 ### 3.4 `window.*` 导出面
-`sb`(client)、`SBAUTH`(登录/角色/改密)、`photoUrl`(公开桶直链，留私有桶切换点)、`api`(REST shim)、`REL`(types/all/of/add/update/del)、`DEDUP`(sameName/merge)、`EXPORT`(json/csv/gedcom/shareHtml)、`allocIds(n)`(批量导入预分配 ID)、`LUNARCONV`(万年历)、**`MINUTES`**(纪要:list/get/create/update/del + uploadAudio/playUrl/transcribe/pollStatus/ai,元数据走 PostgREST、录音/转写/AI 走 CF 函数)、**`ADMIN`**(用户管理:listUsers/createUser/setRole/setPerms/resetPassword/disable/enable/del,均带 JWT 调 `/api/admin-users`)。
+`sb`(client)、`SBAUTH`(登录/角色/改密)、`photoUrl`(公开桶直链，留私有桶切换点)、`api`(REST shim)、`REL`(types/all/of/add/update/del)、`DEDUP`(sameName/merge)、`EXPORT`(json/csv/gedcom/shareHtml)、`allocIds(n)`(批量导入预分配 ID)、`LUNARCONV`(万年历)、**`MINUTES`**(纪要:list/get/create/update/del + uploadAudio/playUrl/transcribe/pollStatus/ai + **v0.42 `segUpload/segList`**(边录边传分片 + 崩溃恢复列段),元数据走 PostgREST、录音/转写/AI 走 CF 函数)、**`ADMIN`**(用户管理:listUsers/createUser/setRole/setPerms/resetPassword/disable/enable/del,均带 JWT 调 `/api/admin-users`)。
 
 ### 3.5 RLS（按 JWT `app_metadata`）
 - **SQL 助手**(`policies.sql`,`stable`,读 JWT):`can_write()`=`role∈{editor,admin}`;`can_minutes()`=`role='admin' 或 coalesce(app_metadata.perms,'[]'::jsonb) ? 'minutes'`(`#>` 取 jsonb、coalesce 保 null-safe、含 admin)。
 - 原 10 张业务表：`authenticated` 可读、**`can_write()`**(editor|admin)可写,anon 全空(故 anon key 公开安全)。Storage `photos` 桶 public 读、`can_write()` 写。
-- **纪要(v0.41)**:`minutes` 表 select/insert/update/delete 全门 **`can_minutes()`**;insert `with check (created_by=auth.uid())` + `minutes_set_author` 触发器(`security definer`)服务端强制 `created_by/created_by_email`(防伪造)。**受控列守卫 `minutes_guard_cols`(BEFORE INSERT OR UPDATE)**:`current_user<>'service_role'` 时把 `status/asr_*/transcript*/summary/tasks/mindmap/audio_*/duration_sec/created_*/created_at` 强制为安全默认(INSERT)或原值(UPDATE)→ **普通客户端经 PostgREST 只能改 `title/meeting_at/note`**,状态机/转写/音频只许 CF 函数 service_role 写(防双计费/改 audio_path/伪造)。
+- **纪要(v0.41;v0.42 扩守卫)**:`minutes` 表 select/insert/update/delete 全门 **`can_minutes()`**;insert `with check (created_by=auth.uid())` + `minutes_set_author` 触发器(`security definer`)服务端强制 `created_by/created_by_email`(防伪造)。**受控列守卫 `minutes_guard_cols`(BEFORE INSERT OR UPDATE)**:`current_user<>'service_role'` 时把 `status/asr_*/transcript*/summary/tasks/mindmap/audio_*/duration_sec/created_*/created_at`**+v0.42 `diarized/segment_count`** 强制为安全默认(INSERT)或原值(UPDATE)→ **普通客户端经 PostgREST 只能改 `title/meeting_at/note`**,状态机/转写/音频只许 CF 函数 service_role 写(防双计费/改 audio_path/伪造)。
+- **分段台账 `minute_segments`(v0.42)**:RLS 仅定义 `select`=`can_minutes()`;**不定义 insert/update/delete policy** → RLS 默认拒绝普通客户端所有写(防伪造 `object_path`),分段登记只由 CF service_role 写。`seg-url` 签发前先 `getMinute` 走调用者 JWT 过 RLS;仅 `status='draft'`(录制中)收分片、`seq∈[0,200]`(挡 int4 溢出孤儿 + 存储 DoS);attach 清段用 service_role 且**只删严格属于 `minutes/<id>/` 前缀的段对象**(纵深防御)。
 - **`recordings` 私有桶**(`public:false`):**仅 `select` 给 `can_minutes()`**,**不给客户端 insert/update/delete**(防经 storage-api 覆盖/删他人录音);上传走 CF service_role 签发的签名上传 URL、回放走 CF service_role 签名下载 URL。
 > ⚠ **隐私待办(用户暂缓)**：`history` 表 authenticated 全可读，而 before/after 明文存 contact/address → viewer 可经 history API 读到 PII。照片为公开桶。两项隐私策略待用户决定后处理。
 
@@ -171,12 +172,12 @@ GET `/api/{meta,persons,trash,narratives,verify,transcription,history,backups,au
 | `/api/normalize-dates-glm` | 日期双验证 | editor\|admin | 智谱 GLM `glm-4.6`，`GLM_API_KEY`/`GLM_MODEL`/`GLM_BASE` |
 | `/api/map-columns` | 表格导入 AI 推荐列映射 | editor\|admin | DeepSeek |
 | **`/api/admin-users`**(v0.41) | 用户管理(list/create/setRole/setPerms/resetPassword/disable/enable/delete) | **admin** | **`SUPABASE_SERVICE_ROLE`** 调 GoTrue Admin API。`requireAdmin` 在任何 service_role 调用前;role/perms 白名单;**read-modify-write 整体 app_metadata**(不丢字段);防自我降级/禁用/删除、防删空最后一名启用 admin;错误不回传 service_role/上游 body |
-| **`/api/minutes`**(v0.41) | 纪要后端(action:upload-url/play-url/attach/transcribe/transcribe-status/ai) | **canMinutes**(admin 或 perms 含 minutes) | **`SUPABASE_SERVICE_ROLE`**(签发 recordings 签名 URL + 写受控列)、**`DASHSCOPE_API_KEY`+`DASHSCOPE_BASE`**(阿里 Fun-ASR 异步转写:提交 `X-DashScope-Async`、轮询 tasks、6h 签名URL、`diarization_enabled`)、`DEEPSEEK_API_KEY`(摘要/任务/脑图)。`attach` 校验路径 `validAttachPath`(本纪要文件夹、无穿越)+ 状态锁(仅 draft/uploading/uploaded/failed)防双计费 |
+| **`/api/minutes`**(v0.41;v0.42 加分段) | 纪要后端(action:upload-url/play-url/attach/transcribe/transcribe-status/ai **+ v0.42 seg-url/seg-list**) | **canMinutes**(admin 或 perms 含 minutes) | **`SUPABASE_SERVICE_ROLE`**(签发 recordings 签名 URL + 写受控列)、**`DASHSCOPE_API_KEY`+`DASHSCOPE_BASE`**(阿里 Fun-ASR 异步转写:提交 `X-DashScope-Async`、轮询 tasks、6h 签名URL、`diarization_enabled`)、`DEEPSEEK_API_KEY`(摘要/任务/脑图)。`attach` 校验路径 `validAttachPath`(本纪要文件夹、无穿越)+ 状态锁(仅 draft/uploading/uploaded/failed)防双计费。**v0.42**:`seg-url`(边录边传分片签名URL:仅 `draft` 收、`seq∈[0,200]`、路径 `minutes/<id>/seg-NNNN.<ext>` 服务端构造、登记 `minute_segments`、`segment_count` 单调不回退)、`seg-list`(崩溃恢复列段签名下载URL);`transcribe` **按 `duration_sec` 开/关说话人分离**(`>7200s` 关,`diarized` 落库);`attach` 成功后清分片对象+台账(只删本纪要前缀) |
 
 ### 4.2 部署 / 版本
 - `git push` → CF Pages 自动构建(Framework=None，输出=仓库根)。
 - **改版本必做(双改)**：`app.js` 的 `APP_VERSION` + `index.html` 所有 `?v=x.y.z`(否则 CF/浏览器缓存旧码)。
-- Supabase 建表/改库：按序整段跑 `supabase/{schema,policies,functions,relationships,minutes}.sql`(均幂等;`minutes.sql` 用到 `policies.sql` 的 `can_minutes()`,故在其后)。
+- Supabase 建表/改库：按序整段跑 `supabase/{schema,policies,functions,relationships,minutes,minutes-v042}.sql`(均幂等;`minutes.sql`/`minutes-v042.sql` 用到 `policies.sql` 的 `can_minutes()`,故在其后;`minutes-v042.sql` 在 `minutes.sql` 之后——加 `minute_segments` 表、`minutes.diarized/segment_count` 列、重定义受控列守卫、`recordings` 桶上限提到 200MB)。
 - **CF Pages 环境变量(v0.41 新增)**:`SUPABASE_SERVICE_ROLE`(service_role key,admin-users + minutes 必需)、`DASHSCOPE_API_KEY`(阿里百炼)、`DASHSCOPE_BASE`(按 key 归属区:境内 `https://dashscope.aliyuncs.com` / 国际 `https://dashscope-intl.aliyuncs.com`)。
 - **Supabase Auth 关闭公开注册**(否则有人自助注册绕过 admin 建号)。**引导首个 admin**:跑 `supabase/bootstrap-admin.sql`(改 email),之后网页「用户管理」自助。改 `app_metadata` 后该用户需重新登录生效。
 
@@ -193,7 +194,7 @@ GET `/api/{meta,persons,trash,narratives,verify,transcription,history,backups,au
 
 - 🔒 **隐私(用户暂缓)**：history 库内 PII 对 viewer 可读；照片公开桶 — 待用户定策略。
 - 👥 **用户管理并发 TOCTOU(接受的低风险,v0.41)**:防"删空最后一名 admin" + `setRole/setPerms` 用请求开始时的快照,两个 admin 极端并发互删/同改同一用户存在竞态窗口。家族 1–3 admin 场景实际风险极低;彻底消除需 DB `security definer` RPC + advisory lock/事务 compare-and-swap(规模需要再做)。两轮跨模型评审(GPT-5.5+codex)均标此为唯一残留 Medium。
-- 🎙 **纪要待验证(部署后实测)**:① 开说话人分离时阿里 Fun-ASR 实际上限约 **2h + 单声道**,超时需分段;② Chrome 默认 webm/opus Fun-ASR 可能不收 → 已回退 mp4/WAV-16k,但需真机确认所选格式被识别;③ `DASHSCOPE_BASE` 须与 key 归属区一致(境内/国际),否则提交/轮询失败;④ 转写中文人名/方言准确率需真实样本验,必要时切讯飞(备选,需 HMAC)。
+- 🎙 **纪要待验证(部署后实测)**:① 开说话人分离时阿里 Fun-ASR 单文件上限约 **2h**(v0.42 已按 `duration_sec>2h` 自动关分离,关分离可 ≤12h),仍需真机确认 2h+ 长录音提交/落库正常;② webm/opus 是否被 Fun-ASR 接受为**上线实测项**(v0.42 录音优先 mp4、回退 webm/opus,若 webm 不收需真机验并调格式偏好);③ `DASHSCOPE_BASE` 须与 key 归属区一致(境内/国际),否则提交/轮询失败;④ 转写中文人名/方言准确率需真实样本验,必要时切讯飞(备选,需 HMAC);⑤ **v0.42 分段兜底/恢复**:模拟录音中途关页 → 详情「恢复并保存整场」能重拼上传;`segment_count=lt.` 单调 PATCH、`seq∈[0,200]` 门、`status='draft'` 门为服务端行为,需真机/DB 侧确认(逻辑探针已过,但 PostgREST 过滤器与 Fun-ASR 长音频为实测项)。
 - 🧩 **company 列未贯通**：import_full RPC / reinsertPerson 漏迁(Wave 1)。
 - 🚀 **导入根治**：`import_persons` 批量 RPC(服务端算号+逐行 history+atomic) 替代现"预分配号段+并发池"止血(Wave 1)。
 - 📈 **上万人扩展**(Wave 2，看规模是否成真)：ECharts 全图护栏、名册虚拟滚动、服务端搜索/分页、万级图换 WebGL。
@@ -204,6 +205,7 @@ GET `/api/{meta,persons,trash,narratives,verify,transcription,history,backups,au
 
 ## 变更记录（由 /zupu-spec-sync 追加）
 
+- **2026-07-01 v0.42.0**:纪要**长录音**(扛数小时)——录音改**低码率 `audioBitsPerSecond:32000` + 3 分钟分段 timeslice 边录边传**(`seg-url` 签名直传私有桶作崩溃兜底、登记 `minute_segments` 台账),**停止时前端把内存同源分片拼成整场单文件**上传、attach 后清分片;新增**崩溃恢复**(`seg-list` 下载分片重拼,`recoverRecording`);格式优先 mp4、回退 webm/opus(webm 是否被 Fun-ASR 收为上线实测项);5h 安全上限;`recordings` 桶单文件上限提到 200MB。转写**按 `duration_sec` 开/关说话人分离**(`>2h` 关分离→只出文字、详情提示;`diarized` 落库)。新表 `minute_segments`(仅 service_role 写,RLS 默认拒客户端写)+ `minutes.diarized/segment_count` 列 + 重定义受控列守卫;新 SQL `minutes-v042.sql`。**经跨模型评审(GPT-5.5 cursor-agent + codex):修复 ①`seg-url` 无界签发+`seq` int4 溢出成不可清理孤儿对象(加 `seq∈[0,200]` 门)②`seg-url` 无状态门(仅 `draft` 收,防转写后堆垃圾)③崩溃恢复恒传 `duration=0` 致 >2h 录音错误开分人被 Fun-ASR 拒(改按段数×180 估时长);另加 `segment_count` 单调 PATCH、attach 清段前缀守卫(纵深防御)。逻辑探针含全部评审反例全过(seq 越界/int4 溢出/状态门/恢复时长/清段前缀)**。
 - **2026-06-30 v0.41.0**:三大新功能——**①用户权限管理**(新 admin 角色 + `app_metadata.perms` 功能位;`can_write()/can_minutes()` 助手;放宽全部 editor→editor|admin;新「用户管理」tab(仅admin)+ `users.js` + `functions/api/admin-users.js`(service_role 调 GoTrue Admin API,白名单+防锁死)+ `window.ADMIN`);**②纪要菜单访问控制**(标签按 canMinutes/isAdmin 显隐,无权不展示);**③纪要(NotebookLM 式)**(新 `minutes` 表 + 私有桶 `recordings` + 作者/受控列守卫触发器;新「纪要」tab + `minutes.js`(MediaRecorder mp4→WAV-16k 回退/上传/转写轮询/AI整理)+ `functions/api/minutes.js`(阿里 Fun-ASR 异步转写+DeepSeek 摘要/任务/脑图,service_role 签名URL+受控写,attach 路径校验+状态锁防双计费)+ `window.MINUTES`)。新 CF env `SUPABASE_SERVICE_ROLE`/`DASHSCOPE_API_KEY`/`DASHSCOPE_BASE`;新 SQL `minutes.sql`/`bootstrap-admin.sql`;关公开注册。**经两轮跨模型评审(GPT-5.5+codex):修复 客户端任意改列(UPDATE+INSERT 列守卫)、attach 状态回退、recordings 客户端直写、路径穿越;42 条逻辑探针全过;残留 M4/M5 管理端并发 TOCTOU 接受为低风险**。
 - **2026-06-30 v0.31.0**：修导出/备份取数 bug(`fullData` 误取回收站→改 `listAllPersons` 全量)；GEDCOM/分享 HTML 改读 father 边(找回 15 条父子链)；删关系边存 before 并纳入可撤销(改父亲可撤)；reconcileFatherEdge 不再静默吞错；导入止血(预分配号段 `allocIds` + 并发池);全量读取加 `selectAll` 分页防 1000 行截断。首版 FEATURES.md。
 - **2026-06-30 v0.32.0**：app.js 模块化(零构建)——把「配偶 blob 转边」抽到 `tools-spouse.js`、「日期规范化+表格导入+AI批量」抽到 `tools-dates-import-ai.js`;app.js 1934→~1300 行。机制:app.js 末尾把核心符号挂 window,工具模块裸引用经全局对象解析、并把自己公开函数+事件绑定挂回 window。函数体零改写。浏览器实测全过(登录/渲染/导入·AI·日期规范化·配偶转换 各入口零报错)。

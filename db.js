@@ -400,6 +400,15 @@ window.MINUTES = {
     await _fn("/api/minutes", { action:"attach", minuteId:id, path, mime:file.type||"", size:file.size||0, duration:duration||0 });
     return { path };
   },
+  // 分段录音:边录边传每个分片(崩溃兜底);seq=0,1,2…。停止时前端仍把整场拼成单文件走 uploadAudio,attach 后段被清理。
+  segUpload: async (id, seq, blob, ext) => {
+    const e = (ext || (String(blob.type||"").split("/")[1]) || "webm").toLowerCase();
+    const { path, token } = await _fn("/api/minutes", { action:"seg-url", minuteId:id, seq, ext:e, size:blob.size||0 });
+    const up = await sb.storage.from("recordings").uploadToSignedUrl(path, token, blob, { contentType:blob.type||"application/octet-stream" });
+    if(up.error) throw new Error("分片上传失败: "+up.error.message);
+    return { path };
+  },
+  segList: (id) => _fn("/api/minutes", { action:"seg-list", minuteId:id }).then(d => d.segments || []),
   playUrl:    async (id) => (await _fn("/api/minutes", { action:"play-url", minuteId:id })).url,
   transcribe: async (id) => _fn("/api/minutes", { action:"transcribe", minuteId:id }),
   pollStatus: async (id) => _fn("/api/minutes", { action:"transcribe-status", minuteId:id }),

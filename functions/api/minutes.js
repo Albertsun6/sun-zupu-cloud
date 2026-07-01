@@ -67,6 +67,12 @@ async function signedUpload(env, path) {
   const token = (String(d.url || "").split("token=")[1] || "").split("&")[0];
   return { path, token };
 }
+// 删除 recordings 桶对象(service_role)。paths = 对象 key 数组。失败静默(清理性质,不阻断主流程)。
+async function svcDelete(env, paths) {
+  const list = (paths || []).filter(Boolean);
+  if (!list.length) return;
+  await fetch(STORAGE + "/object/" + BUCKET, { method: "DELETE", headers: svcHeaders(env), body: JSON.stringify({ prefixes: list }) }).catch(() => {});
+}
 
 // 脑图:剥 ``` 代码围栏 + 缺 mindmap 头时补一个(供前端 mermaid 渲染)。导出以便探针验证。
 export function normalizeMindmap(content) {
@@ -162,7 +168,44 @@ export async function onRequestPost({ request, env }) {
       // 仅在"未/待转写"状态可绑定录音;禁止把 transcribing/transcribed/done 打回 uploaded(否则可再触发转写=双计费)
       const rows = await restSvc("PATCH", env, "/minutes?id=eq." + id + "&status=in.(draft,uploading,uploaded,failed)", { audio_path: path, audio_mime: String(body.mime || ""), audio_size: parseInt(body.size, 10) || 0, duration_sec: parseInt(body.duration, 10) || 0, status: "uploaded" }, "return=representation");
       if (!Array.isArray(rows) || !rows.length) return json({ error: "当前状态不可附加录音(正在转写或已转写)" }, 409);
+      // 整场文件已存,边录边传的分片兜底可清(省存储):删段对象 + 台账
+      try {
+        const pfx = "minutes/" + id + "/";
+        const segs = await rest("GET", token, "/minute_segments?minute_id=eq." + id + "&select=object_path");
+        // 纵深防御:只删严格属于本纪要文件夹的段对象(即便台账 object_path 被污染,也删不到别处),且不删刚附加的整场文件。
+        await svcDelete(env, (segs || []).map(s => s.object_path).filter(p => p && p !== path && p.startsWith(pfx)));
+        await restSvc("DELETE", env, "/minute_segments?minute_id=eq." + id);
+      } catch (e) {}
       return json({ ok: true });
+    }
+
+    // ---------- 分段录音:签发分片的签名上传 URL + 登记台账(边录边传,崩溃兜底)----------
+    if (action === "seg-url") {
+      if (!env.SUPABASE_SERVICE_ROLE) return json({ error: "服务器未配置 SUPABASE_SERVICE_ROLE" }, 500);
+      const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
+      const mine = await getMinute(token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
+      // 分段只在【录制中】(draft,未 attach)才收:已 uploaded/transcribing/transcribed/done 的纪要不再签发分片上传URL(防转写后仍能堆垃圾对象)
+      if (mine.status !== "draft") return json({ error: "当前状态不接受分段上传" }, 409);
+      // seq 上界:5h 上限 ÷ 3min ≈ 100 段,给 2× 余量封顶 200。超界(含 int4 溢出如 2147483648)一律拒:既防溢出插台账失败留下不可清理的孤儿对象,又封存储 DoS。
+      const seq = parseInt(body.seq, 10); if (!(seq >= 0 && seq <= 200)) return json({ error: "seq 越界" }, 400);
+      let ext = String(body.ext || "webm").toLowerCase().replace(/[^a-z0-9]/g, ""); if (!EXT_OK.has(ext)) ext = "webm";
+      const path = "minutes/" + id + "/seg-" + String(seq).padStart(4, "0") + "." + ext;
+      const up = await signedUpload(env, path);
+      await restSvc("POST", env, "/minute_segments?on_conflict=minute_id,seq", { minute_id: id, seq, object_path: path, size: parseInt(body.size, 10) || 0 }, "resolution=ignore-duplicates").catch(() => {});
+      // 计数单调不回退:分片乱序即传时,晚到的小 seq 不得把已到的大 seq 计数改小(仅当当前值 < seq+1 才更新)。
+      await restSvc("PATCH", env, "/minutes?id=eq." + id + "&segment_count=lt." + (seq + 1), { segment_count: seq + 1 }).catch(() => {});
+      return json({ ok: true, ...up });
+    }
+
+    // ---------- 崩溃恢复:列出已上传分片(带签名下载URL),供前端重拼整场文件 ----------
+    if (action === "seg-list") {
+      if (!env.SUPABASE_SERVICE_ROLE) return json({ error: "服务器未配置 SUPABASE_SERVICE_ROLE" }, 500);
+      const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
+      const mine = await getMinute(token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
+      const rows = await rest("GET", token, "/minute_segments?minute_id=eq." + id + "&order=seq&select=seq,object_path");
+      const segs = [];
+      for (const r of (rows || [])) { const url = await signedDownload(env, r.object_path, 3600).catch(() => null); if (url) segs.push({ seq: r.seq, url }); }
+      return json({ ok: true, segments: segs });
     }
 
     // ---------- 提交转写(阿里 Fun-ASR 异步)----------
@@ -174,6 +217,9 @@ export async function onRequestPost({ request, env }) {
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
       const m = await getMinute(token, id); if (!m) return json({ error: "纪要不存在或无权限" }, 404);
       if (!m.audio_path) return json({ error: "请先上传录音" }, 400);
+      // 说话人分离按时长开关:阿里 Fun-ASR 开分离建议单文件 ≤2h;>2h 关分离(无分离时 ≤12h 可转)→ 只出文字。
+      // 时长未知(=0,如上传的文件)默认开分离(多数是短音频);仅在明确 >2h 时关。
+      const wantDiar = !((m.duration_sec || 0) > 7200);
       // 幂等:已在转写且有 task_id → 直接返回,不重复提交(防双计费)
       if (m.status === "transcribing" && m.asr_task_id) return json({ ok: true, status: "transcribing", task_id: m.asr_task_id, note: "已在转写中" });
       const ext = String(m.audio_path.split(".").pop() || "").toLowerCase();
@@ -186,13 +232,13 @@ export async function onRequestPost({ request, env }) {
         const sub = await fetch(base + "/api/v1/services/audio/asr/transcription", {
           method: "POST",
           headers: { authorization: "Bearer " + dkey, "content-type": "application/json", "X-DashScope-Async": "enable" },
-          body: JSON.stringify({ model: env.DASHSCOPE_MODEL || "fun-asr", input: { file_urls: [signed] }, parameters: { diarization_enabled: true } }),
+          body: JSON.stringify({ model: env.DASHSCOPE_MODEL || "fun-asr", input: { file_urls: [signed] }, parameters: wantDiar ? { diarization_enabled: true } : {} }),
         });
         const sd = await sub.json().catch(() => ({}));
         const taskId = sd && sd.output && sd.output.task_id;
         if (!sub.ok || !taskId) { await restSvc("PATCH", env, "/minutes?id=eq." + id, { status: "failed", asr_error: "提交转写失败(" + sub.status + ")" }); return json({ error: "提交转写失败" }, 502); }
-        await restSvc("PATCH", env, "/minutes?id=eq." + id, { asr_task_id: taskId });
-        return json({ ok: true, status: "transcribing", task_id: taskId });
+        await restSvc("PATCH", env, "/minutes?id=eq." + id, { asr_task_id: taskId, diarized: wantDiar });
+        return json({ ok: true, status: "transcribing", task_id: taskId, diarized: wantDiar });
       } catch (e) {
         await restSvc("PATCH", env, "/minutes?id=eq." + id, { status: "failed", asr_error: "提交转写异常" }).catch(() => {});
         throw e;

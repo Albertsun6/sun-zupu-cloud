@@ -107,16 +107,20 @@ function detailHtml(m){
     <div class="mdet-sec"><div class="dsec-h">🎙 录音</div>
       ${hasAudio
         ? `<audio id="mAudio" controls preload="none" style="width:100%"></audio><div class="hint">录音已永久保存(私有,仅有纪要权限者可听)。</div>`
-        : `<div class="recctl"><button class="btn btn-primary" id="recStart">● 开始录音</button>
-             <button class="btn btn-danger" id="recStop" style="display:none">■ 停止并保存</button>
-             <span class="rectime" id="recTime" style="display:none">00:00</span></div>
-           <div class="hint" style="margin:.3rem 0">或 <button class="btn btn-sm" id="upPick">📁 上传音频文件</button>(mp3 / m4a / wav 等)
-             <input type="file" id="upFile" accept="audio/*" style="display:none"></div>
-           <div class="hint" id="recMsg"></div>`}
+        : (m.segment_count>0
+            ? `<div class="note">⚠️ 上次录音中断,已自动保存 ${m.segment_count} 段(每段约 3 分钟)。<button class="btn btn-primary btn-sm" id="recRecover">恢复并保存整场</button></div>
+               <div class="hint" id="recMsg"></div>`
+            : `<div class="recctl"><button class="btn btn-primary" id="recStart">● 开始录音</button>
+                 <button class="btn btn-danger" id="recStop" style="display:none">■ 停止并保存</button>
+                 <span class="rectime" id="recTime" style="display:none">00:00</span></div>
+               <div class="hint" style="margin:.3rem 0">或 <button class="btn btn-sm" id="upPick">📁 上传音频文件</button>(mp3 / m4a / wav 等)
+                 <input type="file" id="upFile" accept="audio/*" style="display:none"></div>
+               <div class="hint" id="recMsg">边录边自动保存,可录数小时;超过 2 小时只出文字、不区分说话人。</div>`)}
     </div>
 
     <div class="mdet-sec"><div class="dsec-h">📝 转写文字 ${m.status==="transcribing"?'<span class="hint" id="trMsg">转写中…(可关闭页面,稍后回来查看)</span>':""}</div>
       ${transcribeBtnHtml(m)}
+      ${(m.status==="transcribed"&&m.diarized===false&&((m.transcript||"").trim()||segs.length))?'<div class="hint">ℹ️ 本次录音超过 2 小时,未做说话人分离,仅文字。</div>':""}
       <div id="transcriptBox">${transcriptHtml(segs, m.transcript)}</div></div>
 
     <div class="mdet-sec ai-sec"><div class="dsec-h">🤖 AI 整理(DeepSeek)</div>
@@ -135,6 +139,7 @@ function bindDetail(m){
   const trGo=document.getElementById("trGo"); if(trGo) trGo.onclick=()=>doTranscribe(m.id);
   const rs=document.getElementById("recStart"); if(rs) rs.onclick=()=>startRecording(m.id);
   const rp=document.getElementById("recStop"); if(rp) rp.onclick=()=>stopRecording(m.id);
+  const rr=document.getElementById("recRecover"); if(rr) rr.onclick=()=>recoverRecording(m.id);
   const up=document.getElementById("upPick"), uf=document.getElementById("upFile");
   if(up&&uf){ up.onclick=()=>uf.click(); uf.onchange=()=>{ if(uf.files[0]) uploadAndAttach(m.id, uf.files[0], 0); }; }
   document.querySelectorAll(".aiGen").forEach(b=> b.onclick=()=>genAI(m.id, b.dataset.kind, b));
@@ -156,13 +161,15 @@ function openEditMinute(m){
   };
 }
 
-/* ---------- 录音(优先 mp4/AAC;浏览器只支持 webm 时回退 WAV-16k 单声道,保证 Fun-ASR 兼容,F13)---------- */
+/* ---------- 录音(v0.42:低码率 + 分段即传兜底 + 停止拼单文件;扛 4-5h)---------- */
+// 优先 mp4/AAC(Fun-ASR 兼容确定);Chrome 无 mp4 时用 webm/opus(紧凑;Fun-ASR 是否接受为上线实测项);都不支持才 WAV。
 function pickMime(){
   const prefs=["audio/mp4","audio/aac","audio/webm;codecs=opus","audio/webm","audio/ogg;codecs=opus"];
   if(!window.MediaRecorder||!MediaRecorder.isTypeSupported) return "";
   for(const t of prefs){ if(MediaRecorder.isTypeSupported(t)) return t; }
   return "";
 }
+function mimeExt(mime){ if(!mime||mime==="audio/wav"||/wav/.test(mime)) return "wav"; if(/mp4|aac|m4a/.test(mime)) return "m4a"; if(/ogg/.test(mime)) return "ogg"; return "webm"; }
 // 用 Web Audio 采 PCM → 编码 16k 单声道 WAV(ScriptProcessor 已弃用但兼容性最好;无构建,不需 worklet 文件)
 function makeWavRecorder(stream){
   const Ctx=window.AudioContext||window.webkitAudioContext;
@@ -188,24 +195,28 @@ async function startRecording(id){
   const msg=document.getElementById("recMsg");
   try{
     const stream=await navigator.mediaDevices.getUserMedia({ audio:{ channelCount:1, echoCancellation:true, noiseSuppression:true } });
-    const mime=pickMime();
+    const mime=pickMime(), ext=mimeExt(mime);
     let ctl;
-    if(mime && /mp4|aac/.test(mime)){
-      const mr=new MediaRecorder(stream,{mimeType:mime}); const chunks=[];
-      mr.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
-      mr.start(1000);
-      ctl={ stream, mime, stop:()=>new Promise(res=>{ mr.onstop=()=>res(new Blob(chunks,{type:mime})); mr.stop(); }) };
-    }else{
+    if(mime){   // MediaRecorder(mp4/webm):低码率 + 分段 timeslice(每片:内存留存拼整场 + 即传兜底)
+      let mr; try{ mr=new MediaRecorder(stream,{ mimeType:mime, audioBitsPerSecond:32000 }); }
+      catch(e){ mr=new MediaRecorder(stream,{ mimeType:mime }); }   // 个别浏览器不支持 audioBitsPerSecond
+      const chunks=[]; let seq=0;
+      mr.ondataavailable=e=>{ if(e.data&&e.data.size){ chunks.push(e.data); const s=seq++; window.MINUTES.segUpload(id,s,e.data,ext).catch(()=>{}); } };
+      mr.start(180000);   // 3 分钟一片
+      ctl={ stream, mime, ext, mode:"mr", chunks, stop:()=>new Promise(res=>{ mr.onstop=()=>res(new Blob(chunks,{type:mime})); mr.stop(); }) };
+    }else{   // 极少数无 mp4/webm 的浏览器 → WAV(无分段;不建议长录音)
       const w=makeWavRecorder(stream);
-      ctl={ stream, mime:"audio/wav", stop:async()=>w.stop() };
+      ctl={ stream, mime:"audio/wav", ext:"wav", mode:"wav", stop:async()=>w.stop() };
     }
     rec={ ...ctl, start:Date.now() };
     document.getElementById("recStart").style.display="none";
     const stopBtn=document.getElementById("recStop"), tEl=document.getElementById("recTime");
     stopBtn.style.display=""; tEl.style.display="";
-    rec.timer=setInterval(()=>{ const s=Math.floor((Date.now()-rec.start)/1000); tEl.textContent=fmtDur(s); if(s>=7140){ msg.textContent="接近 2 小时上限,已自动停止保存。"; stopRecording(id); } },500);
-    msg.className="hint"; msg.textContent= ctl.mime==="audio/wav" ? "● 录音中(WAV,文件较大但识别兼容最好)…" : "● 录音中…";
-  }catch(e){ msg.className="err"; msg.textContent="无法录音:"+(e&&e.message||e)+"(请在浏览器允许麦克风权限,且需 https / localhost)"; }
+    rec.timer=setInterval(()=>{ const s=Math.floor((Date.now()-rec.start)/1000); tEl.textContent=fmtDur(s);
+      if(s>=18000){ msg.textContent="接近 5 小时,已自动停止保存。"; stopRecording(id); } },500);   // 5h 安全上限
+    msg.className="hint"; msg.textContent = rec.mode==="wav" ? "● 录音中(WAV 兼容模式,不建议长录音)…"
+      : "● 录音中…(边录边自动保存;超过 2 小时只出文字、不区分说话人)";
+  }catch(e){ msg.className="err"; msg.textContent="无法录音:"+(e&&e.message||e)+"(请允许麦克风权限,且需 https / localhost)"; }
 }
 async function stopRecording(id){
   if(!rec) return;
@@ -214,7 +225,7 @@ async function stopRecording(id){
   msg.className="hint"; msg.textContent="处理录音…";
   let blob; try{ blob=await rec.stop(); }catch(e){ msg.className="err"; msg.textContent="录音失败:"+e.message; rec=null; return; }
   try{ rec.stream.getTracks().forEach(t=>t.stop()); }catch(e){}
-  const ext = rec.mime==="audio/wav" ? "wav" : (rec.mime.indexOf("mp4")>=0||rec.mime.indexOf("aac")>=0 ? "m4a" : "webm");
+  const ext=rec.ext||mimeExt(rec.mime);
   const file=new File([blob], "recording."+ext, { type: blob.type||rec.mime });
   rec=null;
   await uploadAndAttach(id, file, dur);
@@ -222,10 +233,26 @@ async function stopRecording(id){
 async function uploadAndAttach(id, file, dur){
   const msg=document.getElementById("recMsg")||{};
   try{
-    msg.className="hint"; msg.textContent="上传中…("+(Math.round(file.size/1024/1024*10)/10)+" MB)";
-    await window.MINUTES.uploadAudio(id, file, dur||0);   // 上传 + 服务端 attach(设 audio_path/status/时长)
+    msg.className="hint"; msg.textContent="保存整场录音…("+(Math.round(file.size/1024/1024*10)/10)+" MB)";
+    await window.MINUTES.uploadAudio(id, file, dur||0);   // 单文件上传 + 服务端 attach(设 audio_path/status/时长,并清理分片兜底)
     await openMinuteDetail(id);   // 刷到"待转写"
-  }catch(e){ msg.className="err"; msg.textContent="上传失败:"+e.message; }
+  }catch(e){ msg.className="err"; msg.textContent="保存失败:"+e.message+"(录音过长可能超出单文件上限)"; }
+}
+// 崩溃恢复:录到一半页面崩了(有分片台账、无整场文件)→ 下载分片、按序拼成整场、上传
+async function recoverRecording(id){
+  const msg=document.getElementById("recMsg")||{};
+  try{
+    msg.className="hint"; msg.textContent="下载已保存的分片…";
+    const segs=await window.MINUTES.segList(id);
+    if(!segs.length){ msg.className="err"; msg.textContent="没有可恢复的分片"; return; }
+    const blobs=[];
+    for(const s of segs){ const r=await fetch(s.url); if(r.ok) blobs.push(await r.blob()); }
+    if(!blobs.length){ msg.className="err"; msg.textContent="分片下载失败"; return; }
+    const type=blobs[0].type||"audio/webm", ext=mimeExt(type);
+    const full=new Blob(blobs,{type});
+    const estDur=segs.length*180;   // 崩溃恢复无精确时长 → 按段数估(每段 3 分钟);略高估→>2h 时偏向"关分人"(Fun-ASR 开分人仅 ≤2h,高估更安全,避免转写被拒)
+    await uploadAndAttach(id, new File([full],"recording."+ext,{type}), estDur);
+  }catch(e){ msg.className="err"; msg.textContent="恢复失败:"+e.message; }
 }
 
 /* ---------- 转写 + 轮询 ---------- */
