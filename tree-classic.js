@@ -50,8 +50,12 @@ function buildClassicForest(LIN){
   const children = {};
   nodes.forEach(id => { const par = parentOf(id); if (par != null) (children[par] = children[par] || []).push(id); });
   Object.keys(children).forEach(k => children[k].sort(cmp));
-  const roots = nodes.filter(id => parentOf(id) == null).sort(cmp);
+  // 根的排序键:世代锚点,无锚点视为 1(最老)——新补的始祖常没填世代,若按普通键(null=9999)会被排到断片之后、抢走最右"长房"位
+  const rootKey = id => { const g = genOf(id); return g != null ? g : 1; };
+  const roots = nodes.filter(id => parentOf(id) == null).sort((a, b) => rootKey(a) - rootKey(b) || cmp(a, b));
 
+  // 横坐标(raw,叶子计数):父框**压在长子正上方**(取 kids[0] 的 x,不再取中点)——
+  // 老祖宗主干因此成一条竖直线;整图再经镜像(见 renderClassicTree 的 mx)变成古式"长在右、自右向左读"。
   const X = {}; const seen = new Set(); let leaf = 0;
   const assign = id => {
     if (seen.has(id)) return; seen.add(id);
@@ -59,7 +63,7 @@ function buildClassicForest(LIN){
     if (!kids.length){ X[id] = leaf++; return; }
     kids.forEach(assign);
     const xs = kids.filter(k => X[k] != null);
-    X[id] = xs.length ? (X[xs[0]] + X[xs[xs.length - 1]]) / 2 : leaf++;
+    X[id] = xs.length ? X[xs[0]] : leaf++;   // 压长子正上方(长子 x = 本支最小叶,镜像后=本支最右)
   };
   roots.forEach(assign);
   nodes.forEach(id => { if (X[id] == null) X[id] = leaf++; });
@@ -106,7 +110,7 @@ function renderClassicTree(){
     return;
   }
 
-  // ---- 待接续(无父子连接的本族成员):像孙景发那样,作为普通浮框接在【各自世代行的最右端】(无上连线、无独立面板/标签/虚线)----
+  // ---- 待接续(无父子连接的本族成员):像孙景发那样,作为普通浮框接在各自世代行的行末(raw 在右,镜像后=最左端;无上连线、无独立面板/标签/虚线)----
   const ORPHAN_GAP = 2;                                  // 与主树之间留一点点空隙(列)
   const rightBase = F.leafCount + ORPHAN_GAP;
   const bandsMain = [...new Set(F.nodes.map(id => F.band[id]))];
@@ -127,7 +131,9 @@ function renderClassicTree(){
   const drawn = F.nodes.concat(F.orphans);
   const bands = [...new Set(drawn.map(bandOf))].sort((a, b) => a - b);
   const maxX = Math.max(F.leafCount - 1, ...(F.orphans.length ? F.orphans.map(o => orphanX[o]) : [0]));
-  const cx = id => CT.GUTTER_W + CT.PAD_L + xOf(id) * CT.COL + CT.BOX_W / 2;
+  // 古式镜像:raw x(长在左)→ maxX-x(长在右、自右向左读);老祖宗主干贴最右、待接续被镜到最左端
+  const mx = id => maxX - xOf(id);
+  const cx = id => CT.GUTTER_W + CT.PAD_L + mx(id) * CT.COL + CT.BOX_W / 2;
   const boxLeft = id => cx(id) - CT.BOX_W / 2;
   const totalW = CT.GUTTER_W + CT.PAD_L * 2 + maxX * CT.COL + CT.BOX_W;
 
@@ -264,7 +270,7 @@ function ctControlsHtml(famOpts, zoom){
     + `<button class="btn btn-sm" id="ctZoomReset">100%</button></span>`
     + `<button class="btn btn-sm" id="ctFull">${document.fullscreenElement ? "⛶ 退出全屏" : "⛶ 全屏"}</button>`
     + `<button class="btn btn-sm" id="ctPrint">🖨 打印 / 存 PDF</button>`
-    + `<span class="hint"><b style="color:#1d4ed8">男</b>·<b style="color:#db2777">女</b> 不同色;<span class="ct-leg-gone">名字加框</span>=已故;绿框=直系;点框看详情。</span>`
+    + `<span class="hint">古式:<b>自右向左读,长在右</b>;<b style="color:#1d4ed8">男</b>·<b style="color:#db2777">女</b> 不同色;<span class="ct-leg-gone">名字加框</span>=已故;绿框=直系;点框看详情。</span>`
     + `</div>`;
 }
 function ctHeaderHtml(LIN, F){
