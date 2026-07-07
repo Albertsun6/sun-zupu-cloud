@@ -4,8 +4,7 @@
 // 出参:{ mapping:{ "0":"", "1":"company", "2":"name", ... } }   值=字段 key 或 ""(忽略)
 // 安全:仅放行已登录 editor;DeepSeek key 存 CF 环境变量 DEEPSEEK_API_KEY。人工最终审核,故为辅助建议。
 
-const SB_URL  = "https://ktalsyrxueabdisrszde.supabase.co";
-const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0YWxzeXJ4dWVhYmRpc3JzemRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc3MjYsImV4cCI6MjA5ODEwMzcyNn0.Chj8Zdn9BbK7PbpiEoa7iKDmuq_fSab019vL5X5vtPc";
+import { json, extractJson, requireWrite } from "./_shared.js";   // 门禁/常量统一走 _shared(本函数原本就不回传上游体)
 
 const SYSTEM = `你是表格列映射助手。用户给你:headers(一组表头名)、sample(每列一个样例值,与 headers 一一对应)、fields(目标字段列表,每项含 key 与中文 label)。
 为【每一列】选出最贴切的目标字段 key;明显不属于任何字段的列(如序号、证件类型/号码、年龄、ID 等)用空字符串 ""。
@@ -14,17 +13,9 @@ const SYSTEM = `你是表格列映射助手。用户给你:headers(一组表头�
 {"mapping":{"0":"name","1":"company","2":""}}
 键=列下标(从 0 起的字符串,覆盖每一列),值=fields 里的某个 key 或 ""。`;
 
-function json(o, status){ return new Response(JSON.stringify(o), { status: status||200, headers: { "content-type": "application/json; charset=utf-8" } }); }
-function extractJson(s){ try{ return JSON.parse(s); }catch(e){} const a=s.indexOf("{"), b=s.lastIndexOf("}"); if(a>=0&&b>a){ try{ return JSON.parse(s.slice(a,b+1)); }catch(e){} } return null; }
-
 export async function onRequestPost({ request, env }){
   try{
-    const token = (request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"");
-    if(!token) return json({ error:"未登录" }, 401);
-    const ures = await fetch(SB_URL+"/auth/v1/user", { headers:{ apikey:SB_ANON, authorization:"Bearer "+token } });
-    if(!ures.ok) return json({ error:"登录校验失败,请重新登录" }, 401);
-    const user = await ures.json();
-    if(!["editor","admin"].includes((user&&user.app_metadata&&user.app_metadata.role)||"viewer")) return json({ error:"需要 editor 或 admin 权限" }, 403);
+    const gate = await requireWrite(request); if(gate.resp) return gate.resp;   // _shared 统一门禁(含 aud 校验)
 
     const body = await request.json().catch(()=>({}));
     const headers = Array.isArray(body.headers) ? body.headers.map(x=>String(x==null?"":x)) : [];

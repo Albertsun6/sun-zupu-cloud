@@ -4,8 +4,7 @@
 // 出参:{ results: [{ input, value, ok, note }] }  value=公历 ISO(年月日可缺);ok=false=无法识别
 // 安全:同 ai-parse.js——仅放行已登录 editor;DeepSeek key 存 CF 环境变量 DEEPSEEK_API_KEY。
 
-const SB_URL  = "https://ktalsyrxueabdisrszde.supabase.co";
-const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0YWxzeXJ4dWVhYmRpc3JzemRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc3MjYsImV4cCI6MjA5ODEwMzcyNn0.Chj8Zdn9BbK7PbpiEoa7iKDmuq_fSab019vL5X5vtPc";
+import { json, extractJson, requireWrite, upstreamError } from "./_shared.js";   // 门禁/常量/错误脱敏统一走 _shared
 
 const SYSTEM = `你是中文出生日期/时辰解析助手。把每个输入【拆成结构化字段】——你只负责拆,不做农历↔公历换算(换算由程序的万年历完成):
 - is_lunar: 农历日期=true(出现"初五""腊月""农历""闰X月"等农历写法);公历=false。生肖("属羊")/帝王年号/民国纪年通常配农历,按 true。
@@ -20,17 +19,9 @@ const SYSTEM = `你是中文出生日期/时辰解析助手。把每个输入【
 {"results":[{"input":"原文","is_lunar":false,"year":1979,"month":6,"day":5,"leap":false,"time":"09:00","ok":true,"note":""}]}
 results 顺序与输入一致、长度一致。`;
 
-function json(o, status){ return new Response(JSON.stringify(o), { status: status||200, headers: { "content-type": "application/json; charset=utf-8" } }); }
-function extractJson(s){ try{ return JSON.parse(s); }catch(e){} const a=s.indexOf("{"), b=s.lastIndexOf("}"); if(a>=0&&b>a){ try{ return JSON.parse(s.slice(a,b+1)); }catch(e){} } return null; }
-
 export async function onRequestPost({ request, env }){
   try{
-    const token = (request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"");
-    if(!token) return json({ error:"未登录" }, 401);
-    const ures = await fetch(SB_URL+"/auth/v1/user", { headers:{ apikey:SB_ANON, authorization:"Bearer "+token } });
-    if(!ures.ok) return json({ error:"登录校验失败,请重新登录" }, 401);
-    const user = await ures.json();
-    if(!["editor","admin"].includes((user&&user.app_metadata&&user.app_metadata.role)||"viewer")) return json({ error:"需要 editor 或 admin 权限" }, 403);
+    const gate = await requireWrite(request); if(gate.resp) return gate.resp;   // _shared 统一门禁(含 aud 校验)
 
     const body = await request.json().catch(()=>({}));
     const dates = Array.isArray(body.dates) ? body.dates.map(x=>String(x||"").trim()).filter(Boolean) : [];
@@ -48,7 +39,7 @@ export async function onRequestPost({ request, env }){
         method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+key },
         body: JSON.stringify({ model, stream:false, temperature:0, response_format:{ type:"json_object" }, messages }),
       });
-      if(!dres.ok){ const t=await dres.text(); throw new Error("DeepSeek 调用失败 ("+dres.status+"): "+t.slice(0,300)); }
+      if(!dres.ok){ throw await upstreamError("DeepSeek", dres); }   // 脱敏:不回传上游响应体
       const data = await dres.json();
       return (data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||"";
     }
@@ -67,16 +58,16 @@ export async function onRequestPost({ request, env }){
       return "";
     }
     let messages=[{ role:"system", content:SYSTEM }, { role:"user", content: JSON.stringify(dates) }];
-    let parsed=null, lastErr="", lastRaw="";
+    let parsed=null, lastErr="";
     for(let attempt=0; attempt<3; attempt++){
       let content; try{ content=await callLLM(messages); }catch(e){ return json({ error:String(e.message||e) }, 502); }
-      lastRaw=content; const p=extractJson(content); const err=validate(p);
+      const p=extractJson(content); const err=validate(p);
       if(!err){ parsed=p; break; }
       lastErr=err;
       messages.push({ role:"assistant", content });   // 把上次输出与错误反馈回去,要求改正
       messages.push({ role:"user", content:`你上次的输出不合格:${err}。请严格按 system 要求【只输出一个 JSON 对象】,{"results":[...]} 长度必须=${dates.length},顺序与输入一致,每项含 input(回显原文)/is_lunar/year(公历年整数或null)/month/day/leap/time/ok。不要任何解释或 markdown。` });
     }
-    if(!parsed) return json({ error:"AI 多次未返回合格结构:"+lastErr, raw:lastRaw.slice(0,400) }, 502);
+    if(!parsed) return json({ error:"AI 多次未返回合格结构:"+lastErr }, 502);   // 脱敏:不回传模型原始输出(lastRaw 只留服务端)
     // 按 input 对齐(防 AI 漏条/乱序);未命中的标 ok=false
     const map = {}; parsed.results.forEach(r=>{ if(r&&typeof r.input==="string") map[r.input.trim()] = r; });
     const num = (v,lo,hi) => { const n=parseInt(v); return (Number.isFinite(n)&&n>=lo&&n<=hi)?n:null; };

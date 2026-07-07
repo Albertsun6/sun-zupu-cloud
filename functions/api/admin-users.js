@@ -12,28 +12,10 @@
 // 配置:CF Pages → Settings → Environment variables 添加 SUPABASE_SERVICE_ROLE(必填,service_role key)。
 //      另需在 Supabase → Auth 关闭"公开注册(Enable signups)",否则有人可自助注册绕过本函数。
 
-const SB_URL  = "https://ktalsyrxueabdisrszde.supabase.co";   // 公开,仅用于校验调用者令牌
-const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0YWxzeXJ4dWVhYmRpc3JzemRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc3MjYsImV4cCI6MjA5ODEwMzcyNn0.Chj8Zdn9BbK7PbpiEoa7iKDmuq_fSab019vL5X5vtPc";
+import { SB_URL, json, requireAdmin, roleOf, permsOf } from "./_shared.js";   // 门禁/常量统一走 _shared(原本函数的 requireAdmin 即其蓝本)
 
 const ROLES = new Set(["admin", "editor", "viewer"]);
 const PERMS = new Set(["minutes"]);
-
-function json(o, status) {
-  return new Response(JSON.stringify(o), { status: status || 200, headers: { "content-type": "application/json; charset=utf-8" } });
-}
-
-// 校验调用者 = 已登录 admin。返回 { user } 或 { resp:Response }
-async function requireAdmin(request) {
-  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  if (!token) return { resp: json({ error: "未登录" }, 401) };
-  const ures = await fetch(SB_URL + "/auth/v1/user", { headers: { apikey: SB_ANON, authorization: "Bearer " + token } });
-  if (!ures.ok) return { resp: json({ error: "登录校验失败,请重新登录" }, 401) };
-  const user = await ures.json();
-  if (!user || user.aud !== "authenticated") return { resp: json({ error: "无效令牌" }, 401) };
-  if (((user.app_metadata && user.app_metadata.role) || "viewer") !== "admin")
-    return { resp: json({ error: "需要管理员(admin)权限" }, 403) };
-  return { user };
-}
 
 function admHeaders(env) { const k = env.SUPABASE_SERVICE_ROLE; return { apikey: k, authorization: "Bearer " + k, "content-type": "application/json" }; }
 
@@ -45,8 +27,6 @@ async function adm(env, method, path, body) {
   return data;
 }
 
-const roleOf  = u => (u && u.app_metadata && u.app_metadata.role) || "viewer";
-const permsOf = u => { const p = u && u.app_metadata && u.app_metadata.perms; return Array.isArray(p) ? p : []; };
 const isBanned = u => { const b = u && u.banned_until; if (!b) return false; const t = Date.parse(b); return !isNaN(t) && t > Date.now(); };
 
 async function listAllUsers(env) {

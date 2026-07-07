@@ -9,30 +9,12 @@
 // 配置:CF Pages env:SUPABASE_SERVICE_ROLE、DASHSCOPE_API_KEY、DASHSCOPE_BASE(按 key 归属区:
 //      境内 https://dashscope.aliyuncs.com / 国际 https://dashscope-intl.aliyuncs.com)、DEEPSEEK_API_KEY(已配)。
 
-const SB_URL  = "https://ktalsyrxueabdisrszde.supabase.co";
-const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0YWxzeXJ4dWVhYmRpc3JzemRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc3MjYsImV4cCI6MjA5ODEwMzcyNn0.Chj8Zdn9BbK7PbpiEoa7iKDmuq_fSab019vL5X5vtPc";
+import { SB_URL, SB_ANON, json, extractJson, requireMinutes } from "./_shared.js";   // 门禁/常量统一走 _shared(原本函数的 requireMinutes 即其蓝本)
+
 const REST = SB_URL + "/rest/v1";
 const STORAGE = SB_URL + "/storage/v1";
 const BUCKET = "recordings";
 const EXT_OK = new Set(["mp3", "mp4", "m4a", "aac", "wav", "flac", "ogg", "opus", "amr", "wma", "webm"]);
-
-function json(o, status) { return new Response(JSON.stringify(o), { status: status || 200, headers: { "content-type": "application/json; charset=utf-8" } }); }
-function extractJson(s) { try { return JSON.parse(s); } catch (e) {} const a = s.indexOf("{"), b = s.lastIndexOf("}"); if (a >= 0 && b > a) { try { return JSON.parse(s.slice(a, b + 1)); } catch (e) {} } return null; }
-
-// 校验调用者具备纪要权限(role=admin 或 perms 含 minutes)。返回 { user, token } 或 { resp }
-async function requireMinutes(request) {
-  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  if (!token) return { resp: json({ error: "未登录" }, 401) };
-  const ures = await fetch(SB_URL + "/auth/v1/user", { headers: { apikey: SB_ANON, authorization: "Bearer " + token } });
-  if (!ures.ok) return { resp: json({ error: "登录校验失败,请重新登录" }, 401) };
-  const user = await ures.json();
-  if (!user || user.aud !== "authenticated") return { resp: json({ error: "无效令牌" }, 401) };
-  const role = (user.app_metadata && user.app_metadata.role) || "viewer";
-  const perms = (user.app_metadata && user.app_metadata.perms) || [];
-  if (role !== "admin" && !(Array.isArray(perms) && perms.includes("minutes")))
-    return { resp: json({ error: "无纪要权限" }, 403) };
-  return { user, token };
-}
 
 // PostgREST(用调用者 JWT,RLS 生效)
 async function rest(method, token, pathQuery, body, prefer) {
@@ -293,6 +275,23 @@ export async function onRequestPost({ request, env }) {
       else if (kind === "mindmap") { const mm = normalizeMindmap(content); patch = { mindmap: mm }; ret = { mindmap: mm }; }
       await restSvc("PATCH", env, "/minutes?id=eq." + id, patch);
       return json({ ok: true, ...ret });
+    }
+
+    // ---------- 删除纪要:清空本纪要名下全部录音对象(service_role)→ 删分片台账 → 删行(调用者 JWT,RLS 兜底)----------
+    // 2026-07-07 健康度评审 P3:原客户端硬删不清桶 → 音频成永久孤儿对象;删除必须清理自己名下的 Storage 对象。
+    if (action === "delete") {
+      if (!env.SUPABASE_SERVICE_ROLE) return json({ error: "服务器未配置 SUPABASE_SERVICE_ROLE" }, 500);
+      const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
+      const mine = await getMinute(token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
+      const pfx = "minutes/" + id + "/";
+      try {   // 清桶失败不阻断删行(对象成孤儿可重跑;私有桶无泄露);list 按文件夹取,不会误及 minutes/12/ 等同前缀号
+        const lr = await fetch(STORAGE + "/object/list/" + BUCKET, { method: "POST", headers: svcHeaders(env), body: JSON.stringify({ prefix: "minutes/" + id, limit: 1000 }) });
+        const items = lr.ok ? await lr.json().catch(() => []) : [];
+        await svcDelete(env, (Array.isArray(items) ? items : []).filter(it => it && it.name).map(it => pfx + it.name));
+      } catch (e) {}
+      await restSvc("DELETE", env, "/minute_segments?minute_id=eq." + id).catch(() => {});
+      await rest("DELETE", token, "/minutes?id=eq." + id);   // 行删除用调用者 JWT(RLS 行可见性兜底)
+      return json({ ok: true });
     }
 
     return json({ error: "未知操作" }, 400);

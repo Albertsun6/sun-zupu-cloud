@@ -389,7 +389,13 @@ window.MINUTES = {
   get:  async (id) => must(await sb.from("minutes").select("*").eq("id",id).maybeSingle()),
   create: async (body) => must(await sb.from("minutes").insert({ title:body.title||"", meeting_at:body.meeting_at||"", note:body.note||"", status:"draft" }).select().single()),
   update: async (id, patch) => must(await sb.from("minutes").update(patch).eq("id",id).select().single()),
-  del:    async (id) => { must(await sb.from("minutes").delete().eq("id",id)); return { ok:true }; },
+  // 删除走 CF 函数(service_role 清空本纪要名下音频对象+分片台账)再删行;删后留痕 history(音频不可复原,故留痕非可撤销)。
+  del:    async (id) => {
+    const before = must(await sb.from("minutes").select("*").eq("id",id).maybeSingle());
+    await _fn("/api/minutes", { action:"delete", minuteId:id });
+    await logHist("delete","minute",String(id),"删除纪要: "+((before&&before.title)||("#"+id)), before, null);
+    return { ok:true };
+  },
   // 录音:经 CF 取签名上传 URL → uploadToSignedUrl(token 授权,绕开 storage RLS 的 app_metadata 古怪)
   uploadAudio: async (id, file, duration) => {
     const ext = ((file.name||"").split(".").pop() || (String(file.type||"").split("/")[1]) || "m4a").toLowerCase();
@@ -454,6 +460,7 @@ async function fullData(redact){
   return { meta, persons, narratives, verify, transcription, relationships, relationship_types, _redacted:!!redact };
 }
 // 推算世代(复刻 app.js genOf):沿父/母上溯到最近手填gen锚点或顶祖+深度;无父随配偶;带 memo+防环
+// ⚠ 双实现契约:与 app.js genOf/_genWalk 语义必须一致(页面显示走那份,导出走这份)——改这里必同步 app.js 并跑 probes/gen-parity.mjs。
 function buildGenOf(persons, relationships){
   const byId={}; (persons||[]).forEach(p=>byId[p.id]=p);
   const fatherOf={}, motherOf={}, spouseOf={};
@@ -486,8 +493,11 @@ async function exportGedcom(){
   const fams={}; rows.forEach(r=>{ const f=fatherOf[r.id]; if(f&&by[f]) (fams[f]=fams[f]||[]).push(r.id); });
   const fx={}; Object.keys(fams).forEach((f,i)=>fx[f]="@F"+(i+1)+"@"); const foc={}; Object.entries(fams).forEach(([f,ks])=>ks.forEach(k=>foc[k]=f));
   const L=["0 HEAD","1 SOUR 关系图谱(人物关系图谱)","1 GEDC","2 VERS 5.5.1","2 FORM LINEAGE-LINKED","1 CHAR UTF-8"];
+  // 姓氏=父系顶祖姓(单字姓近似,同 app.js surnameOfSelf 语义;无父边者用本人首字)——替换原硬编码"孙"(产品已泛化多姓)
+  const rootOfPat=(id,seen)=>{ seen=seen||new Set(); if(seen.has(id)) return id; seen.add(id); const f=fatherOf[id]; return (f&&by[f])?rootOfPat(f,seen):id; };
+  const surnameOf=(id)=>{ const rn=(((by[rootOfPat(id)]||{}).name)||((by[id]||{}).name)||"").trim(); return rn?rn[0]:""; };
   rows.forEach(r=>{ const pid=r.id; L.push("0 "+xref[pid]+" INDI");
-    const nm=r.name||"", sur=nm.startsWith("孙")?"孙":"", giv=sur?nm.slice(sur.length):nm;
+    const nm=r.name||"", sur=surnameOf(pid), giv=(sur&&nm.startsWith(sur))?nm.slice(sur.length):nm;
     L.push("1 NAME "+giv+" /"+sur+"/"); L.push("1 SEX "+(r.sex==="男"?"M":r.sex==="女"?"F":"U"));
     if(r.birth){ L.push("1 BIRT"); L.push("2 DATE "+r.birth); if(r.birth_place) L.push("2 PLAC "+r.birth_place); }
     if(r.death&&r.death!=="无考"){ L.push("1 DEAT"); L.push("2 DATE "+r.death); if(r.burial) L.push("2 PLAC "+r.burial); }

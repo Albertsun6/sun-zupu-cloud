@@ -137,3 +137,6 @@ create table if not exists public.minutes (
   updated_at      timestamptz not null default now()
 );
 create index if not exists minutes_created_idx on public.minutes(created_at desc);
+-- 建表即锁(fail-closed):RLS 就地启用——即使漏跑 minutes.sql(策略在那边),该表也默认全拒而非裸奔。
+-- (2026-07-07 健康度评审 P5:曾有"照过期文档重建库 → minutes 建了表但 RLS 未开"的窗口)
+alter table public.minutes enable row level security;

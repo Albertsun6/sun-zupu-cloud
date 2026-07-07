@@ -6,7 +6,7 @@
 | | |
 |---|---|
 | **产品名** | 关系图谱（品牌固定常量 `APP_NAME`；本质=人物关系图谱，由《孙氏族谱》东北一脉演化而来，已泛化为不限一族一姓的属性图工具，仍能当家谱用） |
-| **当前版本** | v0.44.0 |
+| **当前版本** | v0.45.0 |
 | **最近更新** | 2026-07-07 |
 | **技术栈** | 纯静态 vanilla JS（无构建、纯 ESM + CDN）+ Cloudflare Pages + Supabase(Postgres/Auth/Storage) + CF Pages Functions(代理 AI / 录音转写 / 用户管理) |
 | **前端文件** | `app.js`(核心:state/helpers/render*/CRUD/详情/编辑/boot+权限门禁,~1300行)、`tools-dates-import-ai.js`(日期规范化+表格导入+AI批量)、`tools-spouse.js`(配偶 blob 转边)、`tree-classic.js`(传统谱图挂图渲染)、`minutes.js`(纪要:录音/转写/AI整理,v0.41;v0.42 分段长录音+崩溃恢复)、`users.js`(用户管理,admin,v0.41)、`db.js`(数据层)、`calendar.js`(万年历)。**模块加载顺序**:db→app→calendar→tools-*→tree-classic→minutes→users(均在 app 之后,app 末尾把核心符号挂 window 供其裸引用)。改版本必须同步改 `index.html` 全部 `?v=`。 |
@@ -134,7 +134,7 @@ GET `/api/{meta,persons,trash,narratives,verify,transcription,history,backups,au
 **关系 CRUD 不走 shim，走 `window.REL`。**
 
 ### 3.4 `window.*` 导出面
-`sb`(client)、`SBAUTH`(登录/角色/改密)、`photoUrl`(公开桶直链，留私有桶切换点)、`api`(REST shim)、`REL`(types/all/of/add/update/del)、`DEDUP`(sameName/merge)、`EXPORT`(json/csv/gedcom/shareHtml)、`allocIds(n)`(批量导入预分配 ID)、`LUNARCONV`(万年历)、**`MINUTES`**(纪要:list/get/create/update/del + uploadAudio/playUrl/transcribe/pollStatus/ai + **v0.42 `segUpload/segList`**(边录边传分片 + 崩溃恢复列段),元数据走 PostgREST、录音/转写/AI 走 CF 函数)、**`ADMIN`**(用户管理:listUsers/createUser/setRole/setPerms/resetPassword/disable/enable/del,均带 JWT 调 `/api/admin-users`)。
+`sb`(client)、`SBAUTH`(登录/角色/改密)、`photoUrl`(公开桶直链，留私有桶切换点)、`api`(REST shim)、`REL`(types/all/of/add/update/del)、`DEDUP`(sameName/merge)、`EXPORT`(json/csv/gedcom/shareHtml)、`allocIds(n)`(批量导入预分配 ID)、`LUNARCONV`(万年历)、**`MINUTES`**(纪要:list/get/create/update/del + uploadAudio/playUrl/transcribe/pollStatus/ai + **v0.42 `segUpload/segList`**(边录边传分片 + 崩溃恢复列段),元数据走 PostgREST、录音/转写/AI 走 CF 函数;**`del` v0.45 改走 CF `delete` action**:service_role 清空 `minutes/<id>/` 前缀全部音频对象+分片台账→删行,删后 `logHist` 留痕——原客户端硬删不清桶致音频孤儿、违反留痕约定)、**`ADMIN`**(用户管理:listUsers/createUser/setRole/setPerms/resetPassword/disable/enable/del,均带 JWT 调 `/api/admin-users`)。
 
 ### 3.5 RLS（按 JWT `app_metadata`）
 - **SQL 助手**(`policies.sql`,`stable`,读 JWT):`can_write()`=`role∈{editor,admin}`;`can_minutes()`=`role='admin' 或 coalesce(app_metadata.perms,'[]'::jsonb) ? 'minutes'`(`#>` 取 jsonb、coalesce 保 null-safe、含 admin)。
@@ -157,14 +157,17 @@ GET `/api/{meta,persons,trash,narratives,verify,transcription,history,backups,au
 | 分享 HTML | active | 渲染层不显 | 仅姓名 | 否 | **读 father 边**(v0.31.0 修) |
 
 ### 3.8 `import_full(payload jsonb)` RPC
-原子"导入/恢复"：`security definer` + 函数内断言 editor + `TRUNCATE ... restart identity cascade`(非裸 DELETE，避 `pg_safeupdate`)→ 按序重灌。`jsonb_array_elements` 别名用 `pj`(避与变量 `p` 歧义)。
-> ⚠ **已知契约缺口(Wave 1)**：persons INSERT 漏 `company` 列；`reinsertPerson`(撤销 purge)也漏 company → 导入恢复/purge 撤销会丢 company 值。
+原子"导入/恢复"：`security definer` + 函数内断言 **`public.can_write()`(editor|admin;v0.45 修——曾硬编码 `<> 'editor'` 致 admin 恢复被拒)** + `TRUNCATE ... restart identity cascade`(非裸 DELETE，避 `pg_safeupdate`)→ 按序重灌。`jsonb_array_elements` 别名用 `pj`(避与变量 `p` 歧义)。persons INSERT 列清单含 `company`(v0.45 补;须与 db.js EDITABLE/CSV_COLS 同步)。
+> 注:此前记录的"`reinsertPerson` 也漏 company"系过时——它迭代 `EDITABLE` 数组(自 v0.19.1 已含 company),不丢。
 
 ---
 
 ## 4. 后端 / 部署 / 安全
 
 ### 4.1 CF Pages Functions（均先校验调用者 JWT 再动作)
+
+**公共件 `functions/api/_shared.js`(v0.45)**:门禁(`requireWrite/requireAdmin/requireMinutes`,统一含 `aud==='authenticated'` 校验)、`json/extractJson`、Supabase 常量单份、`upstreamError`(错误脱敏:绝不回传上游响应体/模型原始输出)。**规则:新 CF 函数禁止内联这些,一律 import**(ship-checks 有校验;下划线文件不被路由,esbuild 打包,零构建不破)。
+
 | Function | 用途 | 鉴权 | 外部服务 / env |
 |---|---|---|---|
 | `/api/ai-parse` | 粘贴文字→识别成人物 | editor\|admin | DeepSeek `deepseek-chat`，`DEEPSEEK_API_KEY` |
@@ -195,16 +198,19 @@ GET `/api/{meta,persons,trash,narratives,verify,transcription,history,backups,au
 - 🔒 **隐私(用户暂缓)**：history 库内 PII 对 viewer 可读；照片公开桶 — 待用户定策略。
 - 👥 **用户管理并发 TOCTOU(接受的低风险,v0.41)**:防"删空最后一名 admin" + `setRole/setPerms` 用请求开始时的快照,两个 admin 极端并发互删/同改同一用户存在竞态窗口。家族 1–3 admin 场景实际风险极低;彻底消除需 DB `security definer` RPC + advisory lock/事务 compare-and-swap(规模需要再做)。两轮跨模型评审(GPT-5.5+codex)均标此为唯一残留 Medium。
 - 🎙 **纪要待验证(部署后实测)**:① 开说话人分离时阿里 Fun-ASR 单文件上限约 **2h**(v0.42 已按 `duration_sec>2h` 自动关分离,关分离可 ≤12h),仍需真机确认 2h+ 长录音提交/落库正常;② webm/opus 是否被 Fun-ASR 接受为**上线实测项**(v0.42 录音优先 mp4、回退 webm/opus,若 webm 不收需真机验并调格式偏好);③ `DASHSCOPE_BASE` 须与 key 归属区一致(境内/国际),否则提交/轮询失败;④ 转写中文人名/方言准确率需真实样本验,必要时切讯飞(备选,需 HMAC);⑤ **v0.42 分段兜底/恢复**:模拟录音中途关页 → 详情「恢复并保存整场」能重拼上传;`segment_count=lt.` 单调 PATCH、`seq∈[0,200]` 门、`status='draft'` 门为服务端行为,需真机/DB 侧确认(逻辑探针已过,但 PostgREST 过滤器与 Fun-ASR 长音频为实测项)。
-- 🧩 **company 列未贯通**：import_full RPC / reinsertPerson 漏迁(Wave 1)。
+- ~~🧩 company 列未贯通~~ **已修(v0.45)**:import_full 补列;reinsertPerson 经查本就不漏(用 EDITABLE)。
 - 🚀 **导入根治**：`import_persons` 批量 RPC(服务端算号+逐行 history+atomic) 替代现"预分配号段+并发池"止血(Wave 1)。
+- 🪟 **window 导出面收缩(backlog,健康度评审 P6)**:app.js 导出 102 符号仅 18 被消费、tools-dates 52 仅 3——收缩到实际消费集+注明消费方;tools-dates 4 处手写 fetch 收口到 db.js `_fn`。
 - 📈 **上万人扩展**(Wave 2，看规模是否成真)：ECharts 全图护栏、名册虚拟滚动、服务端搜索/分页、万级图换 WebGL。
-- 🔤 GEDCOM 姓氏硬编码"孙"，泛化后待处理；`mergePersons` 仍迁 legacy `father_id`(应只动边)。
+- ~~🔤 GEDCOM 姓氏硬编码"孙"~~ **已修(v0.45)**:改按父系顶祖姓拆(无父边者用本人首字;单字姓近似)。`mergePersons` 仍迁 legacy `father_id`(应只动边);同类还有 `purgePerson` 断子女旧链也写 father_id(db.js,一并留待"father_id 只读冻结"小改)。
+- 🔒 **隐私暂缓项已立 ADR**:`docs/adr/0001` 记录触发条件——**账号发给家族外/半信任成员前**必须先做 history 列级脱敏 + 照片私有桶。
 - 详细 backlog 见 `../待做功能清单.md`；考证类待办见系统内"待核实"/"数据体检"。
 
 ---
 
 ## 变更记录（由 /zupu-spec-sync 追加）
 
+- **2026-07-07 v0.45.0(健康度评审修复批)**:按 `/project-health` 评审(探针+4 lens+GPT-5.5 异构)修复——**P1** `import_full` 角色断言 `<>'editor'`→`public.can_write()`(admin 主账号恢复通道曾断;线上 rpc 实证)+ persons INSERT 补 `company`;**P2** 抽 `functions/api/_shared.js` 统一 6 个 CF 函数的门禁(4 个 AI 函数补 `aud` 校验)/常量(7 份→2 份)/错误脱敏(堵 ai-parse/normalize-dates 上游体与 raw 模型输出回传);**P3** `MINUTES.del` 改走 CF `delete` action(service_role 清桶+台账→删行)+ logHist 留痕;**P4** 新 `probes/gen-parity.mjs`(从两侧源码原样提取执行,230 人全员一致✓)+ 双实现互指注释;**P5** CLAUDE.md SQL 清单补 minutes、schema.sql minutes 建表即 enable RLS、新「模块契约」成文;**P6 顺手** GEDCOM 姓氏改父系顶祖姓、app.js 3 处懒调用补守卫、state 私有键集中登记、`docs/adr/0001` 隐私暂缓触发条件。**新 `probes/ship-checks.sh` 8 项静态门禁**(角色字面量/raw 回传/I-O 收口/版本双改/文档一致等)进 /zupu-ship 清单,全过✓。**注:import_full 修复需在 Supabase SQL Editor 重跑 functions.sql 才生效(见 操作指令/03)。**
 - **2026-07-07 v0.44.0**:① 传统谱图**父框改回"居中于子女中点"**(用户看过 v0.43"压长子"版后选居中;镜像/长右幼左/主树在断片右侧不变);② **同父子女排序改性别绝对优先**(男先女后,新 `sibCmp` 不掺世代——原 sortKey 世代在先,个别锚点异常的姐妹会插到兄弟前;用户点名"男的排前面女的排后面")。探针 10 项全过(父居中/男先女后/主树在断片右侧 等新断言)。**随行数据迁移(用户批准"按建议修正"):世代全谱重编号为单锚点纯推算**——孙希增(S219)设 gen=1 唯一始祖锚点;**41 人清空手填世代**(推算=旧+1 完全一致者)改全自动;**10 人锚点+1 保留**(鸿德/鸿柱、雪棠4姐妹、德举/乃旭/众天/晶淼——其手填与父链本就有意不一致,保留覆盖意图);14 待接续维持今晨+1 值。终态 25 个锚点、11 项抽查全对、逐条留痕可撤销。以后往上补祖先全谱自动顺延。
 - **2026-07-07 v0.43.0**:传统谱图版面改**古式镜像·自右向左读**(用户按古谱习惯选定,出 ASCII 样式图批准后实施)——① `assign()` 父框从"居子女中点"改**压长子正上方**(长子 x=本支最小叶),老祖宗主干成一条竖线;② 渲染层加水平镜像 `mx=maxX-rawX` → **长在右、幼在左**、主干贴最右、**待接续镜到各世代行最左端**;同辈序逻辑(世代→性别男先→长幼→手排号→ID)不变,镜像后"先"=靠右。控件 hint 注明"古式:自右向左读,长在右"。真实库探针 8 项全过(同代零重叠/父压长子/长右幼左/待接续最左/耀·景待接续与同字辈同行/无环/单父)。**随行数据修正(非 spec,记录备查):14 位无父子连接者(鸿范/武、耀堂等4、景才等7、景发)手填世代 +1 对齐新始祖孙希增后的全谱编号,逐条留痕可撤销。**
 - **2026-07-01 v0.42.0**:纪要**长录音**(扛数小时)——录音改**低码率 `audioBitsPerSecond:32000` + 3 分钟分段 timeslice 边录边传**(`seg-url` 签名直传私有桶作崩溃兜底、登记 `minute_segments` 台账),**停止时前端把内存同源分片拼成整场单文件**上传、attach 后清分片;新增**崩溃恢复**(`seg-list` 下载分片重拼,`recoverRecording`);格式优先 mp4、回退 webm/opus(webm 是否被 Fun-ASR 收为上线实测项);5h 安全上限;`recordings` 桶单文件上限提到 200MB。转写**按 `duration_sec` 开/关说话人分离**(`>2h` 关分离→只出文字、详情提示;`diarized` 落库)。新表 `minute_segments`(仅 service_role 写,RLS 默认拒客户端写)+ `minutes.diarized/segment_count` 列 + 重定义受控列守卫;新 SQL `minutes-v042.sql`。**经跨模型评审(GPT-5.5 cursor-agent + codex):修复 ①`seg-url` 无界签发+`seq` int4 溢出成不可清理孤儿对象(加 `seq∈[0,200]` 门)②`seg-url` 无状态门(仅 `draft` 收,防转写后堆垃圾)③崩溃恢复恒传 `duration=0` 致 >2h 录音错误开分人被 Fun-ASR 拒(改按段数×180 估时长);另加 `segment_count` 单调 PATCH、attach 清段前缀守卫(纵深防御)。逻辑探针含全部评审反例全过(seq 越界/int4 溢出/状态门/恢复时长/清段前缀)**。

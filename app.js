@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.44.0";
+const APP_VERSION = "v0.45.0";
 const APP_DATE = "2026-07-01";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -52,7 +52,8 @@ const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[],
                 graphCenter:"", graphHops:2, pathA:"", pathB:"",
                 fatherOf:{}, motherOf:{}, childrenMap:{}, spouseOf:{}, _genCache:{}, _lineageCache:{}, lineages:null,
                 filters:{charGen:"",status:"",alive:""}, customFilters:[],
-                treeMode:null, classicLineage:null, classicZoom:null };   // classicZoom=null ⇒ 传统谱图默认"适应整页"
+                treeMode:null, classicLineage:null, classicZoom:null,   // classicZoom=null ⇒ 传统谱图默认"适应整页"
+                _classicZoomEff:1, _users:null, _spBusy:false };        // 模块私有键集中登记(属主:tree-classic/users/tools-spouse)——模块对 state 共享键只读,新私有键必须回此声明
 
 // api(method,path,body) 由 db.js 提供(Supabase shim);此处不再定义。
 async function reloadPersons(){ state.persons = await api("GET","/api/persons"); }
@@ -70,6 +71,7 @@ async function refreshRelCount(){
   state._genCache={}; state._lineageCache={}; state.lineages=null;
 }
 // 世代推算:沿父(无父则母)上溯到"最近一个有手填gen的锚点"或顶祖,效果=锚点gen+深度;顶祖无手填则=1;无父随配偶同代;带 memo+防环。
+// ⚠ 双实现契约:db.js 的 buildGenOf 是本算法的导出侧复刻(CSV/分享HTML/GEDCOM 用)——改这里必同步 db.js 并跑 probes/gen-parity.mjs。
 function genOf(id){ return _genWalk(id, new Set()); }
 const genStr = id => { const g=genOf(id); return g==null?"?":g; };
 function _genWalk(id, seen){
@@ -574,9 +576,9 @@ function renderHealth(){
     if(box.lastChild) box.lastChild.appendChild(b); }
   // 出生日期规范化工具(规则+AI)
   if(state.canEdit){ const pn=el("div","panel"); pn.innerHTML=`<h3>🤖 出生日期规范化</h3><div class="hint">把「出生日期」统一成 年 / 年-月 / 年-月-日(规则优先,农历/年号等用 AI 兜底),不识别的会标出供手动处理。</div>`;
-    const b=el("button","btn btn-sm btn-primary","规范出生日期…"); b.style.marginTop=".4rem"; b.onclick=openDateNormalizer; pn.appendChild(b); box.appendChild(pn); }
+    const b=el("button","btn btn-sm btn-primary","规范出生日期…"); b.style.marginTop=".4rem"; b.onclick=()=>window.openDateNormalizer&&window.openDateNormalizer(); pn.appendChild(b); box.appendChild(pn); }   // 工具模块符号一律带守卫懒调用(模块在 app 之后加载)
   box.querySelectorAll(".plink").forEach(a=>a.onclick=()=>{ const t=byId(a.dataset.pid); if(t) openDetail(t); });   // 先看详情(含关系列表),编辑走详情里「编辑」
-  box.querySelectorAll(".spConvBtn").forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openSpouseConverter(b.dataset.pid); });
+  box.querySelectorAll(".spConvBtn").forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); window.openSpouseConverter&&window.openSpouseConverter(b.dataset.pid); });
   box.querySelectorAll(".mergebtn").forEach(b=>b.onclick=()=>{ const g=h.dupName.find(x=>x.name===b.dataset.name); if(g) openMergeDialog(g.list); });
   box.querySelectorAll(".useGenBtn").forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); const pid=b.dataset.pid;
     if(!confirm("清除该人手填世代,改由父系图自动推算?")) return;
@@ -704,7 +706,7 @@ async function openDetail(p){
     const av=box.querySelector("img.dphoto"); if(av && gallery.length){ av.style.cursor="zoom-in"; av.onclick=open; }
     const cc=box.querySelector(".dphoto-count"); if(cc) cc.onclick=open; }
   { const eb=$("#relEgoBtn"); if(eb) eb.onclick=()=>{ state.graphCenter=p.id; state.pathA=""; state.pathB=""; closeDetail(); switchView("graph"); }; }
-  { const sb=$("#spConvDetail"); if(sb) sb.onclick=()=>{ closeDetail(); openSpouseConverter(p.id); }; }
+  { const sb=$("#spConvDetail"); if(sb) sb.onclick=()=>{ closeDetail(); window.openSpouseConverter&&window.openSpouseConverter(p.id); }; }
   box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?(直接删除,不可恢复;人物本身不受影响)"))return; try{ await window.REL.del(+b.dataset.rid); await reloadPersons(); await refreshRelCount(); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
   box.querySelectorAll(".relnote").forEach(b=>b.onclick=async()=>{ const rid=+b.dataset.rid, r=rels.find(x=>String(x.id)===b.dataset.rid)||{};
     if(b.dataset.spouse==="1"){   // 配偶:同时改名分(原配/续娶/侧室)+婚配年,以记录先后

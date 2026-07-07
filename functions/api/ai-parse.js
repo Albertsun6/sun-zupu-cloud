@@ -5,8 +5,7 @@
 // 配置:Cloudflare Pages → Settings → Environment variables 添加 DEEPSEEK_API_KEY(必填),
 //       可选 DEEPSEEK_MODEL(默认 deepseek-v4-flash)、DEEPSEEK_BASE(默认 https://api.deepseek.com)。
 
-const SB_URL  = "https://ktalsyrxueabdisrszde.supabase.co";   // 公开,仅用于校验登录令牌
-const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0YWxzeXJ4dWVhYmRpc3JzemRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc3MjYsImV4cCI6MjA5ODEwMzcyNn0.Chj8Zdn9BbK7PbpiEoa7iKDmuq_fSab019vL5X5vtPc";
+import { json, extractJson, requireWrite, upstreamError } from "./_shared.js";   // 门禁/常量/错误脱敏统一走 _shared(禁止内联,见其头注释)
 
 const SYSTEM = `你是中文族谱/人物信息抽取助手。用户给你一段中文文字(族谱片段、名单、讣告、简历、回忆等),请识别其中提到的"人物",每人一条记录,组成 JSON。
 只输出一个 JSON 对象,形如 {"persons":[{...},{...}]},不要任何解释、不要 markdown 代码块。
@@ -29,26 +28,10 @@ const SYSTEM = `你是中文族谱/人物信息抽取助手。用户给你一段
 - note: 其它信息或原文摘录(便于人工核对)。【不要】把出生日期/时辰/生肖放进 note——那些一律进 birth。
 规则:忠于原文,宁缺勿造;一段话提到多人(父子/兄弟/夫妻)就拆成多条;保留原文用词。`;
 
-function json(o, status) {
-  return new Response(JSON.stringify(o), { status: status || 200, headers: { "content-type": "application/json; charset=utf-8" } });
-}
-function extractJson(s) {
-  try { return JSON.parse(s); } catch (e) {}
-  const a = s.indexOf("{"), b = s.lastIndexOf("}");
-  if (a >= 0 && b > a) { try { return JSON.parse(s.slice(a, b + 1)); } catch (e) {} }
-  return null;
-}
-
 export async function onRequestPost({ request, env }) {
   try {
-    // 1) 校验调用者 = 已登录 editor
-    const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-    if (!token) return json({ error: "未登录" }, 401);
-    const ures = await fetch(SB_URL + "/auth/v1/user", { headers: { apikey: SB_ANON, authorization: "Bearer " + token } });
-    if (!ures.ok) return json({ error: "登录校验失败,请重新登录" }, 401);
-    const user = await ures.json();
-    if (!["editor", "admin"].includes((user && user.app_metadata && user.app_metadata.role) || "viewer"))
-      return json({ error: "需要 editor 或 admin 权限才能用 AI 识别" }, 403);
+    // 1) 校验调用者 = 已登录 editor/admin(_shared 统一门禁,含 aud 校验)
+    const gate = await requireWrite(request); if (gate.resp) return gate.resp;
 
     // 2) 文本
     const body = await request.json().catch(() => ({}));
@@ -69,11 +52,11 @@ export async function onRequestPost({ request, env }) {
       body: JSON.stringify({ model, stream: false, temperature: 0,
         messages: [{ role: "system", content: SYSTEM }, { role: "user", content: text }] }),
     });
-    if (!dres.ok) { const t = await dres.text(); return json({ error: "DeepSeek 调用失败 (" + dres.status + "): " + t.slice(0, 300) }, 502); }
+    if (!dres.ok) { const e = await upstreamError("DeepSeek", dres); return json({ error: e.message }, 502); }   // 脱敏:不回传上游响应体
     const data = await dres.json();
     const content = (data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
     const parsed = extractJson(content);
-    if (!parsed || !Array.isArray(parsed.persons)) return json({ error: "AI 未返回有效人物列表", raw: content.slice(0, 500) }, 502);
+    if (!parsed || !Array.isArray(parsed.persons)) return json({ error: "AI 未返回有效人物列表,请重试或换一段文字" }, 502);   // 脱敏:不回传模型原始输出
     const persons = parsed.persons.filter(p => p && (p.name || "").trim());
     return json({ persons, model, count: persons.length });
   } catch (e) {

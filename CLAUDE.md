@@ -19,7 +19,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **本地预览**:`python3 -m http.server 8000`,浏览器开 `http://localhost:8000`。需联网(CDN + Supabase)且要登录;`config.js` 已填真实 url/anon。
 - **部署**:`git push`(到 `Albertsun6/sun-zupu-cloud`)→ Cloudflare Pages 自动构建(Framework=None,Build command 留空,输出目录=仓库根)。无需 CLI。
 - **改版本必做(双改,否则 CF/浏览器缓存旧码)**:同时改 `app.js` 的 `APP_VERSION` 和 `index.html` 底部所有 `?v=x.y.z` 查询串。提交信息惯例见 `git log`(`feat:`/`fix:` + 一句中文 + `vX.Y.Z`)。
-- **Supabase 建表/改库**:在 Supabase SQL Editor **按序整段跑** `supabase/{schema,policies,functions,relationships}.sql`(均幂等,可重复跑)。Supabase 项目 ref `ktalsyrxueabdisrszde`(新加坡)。
+- **Supabase 建表/改库**:在 Supabase SQL Editor **按序整段跑** `supabase/{schema,policies,functions,relationships,minutes,minutes-v042}.sql`(均幂等,可重复跑;`bootstrap-admin.sql` 是一次性初始化)。**此清单以 FEATURES.md §4.2 为单一真源,两处必须一致**(ship-checks 有校验)。Supabase 项目 ref `ktalsyrxueabdisrszde`(新加坡)。
+- **发版前跑门禁探针**:`bash probes/ship-checks.sh`(角色字面量/错误脱敏/I-O收口/版本双改/文档一致,FAIL 不发版);改过世代逻辑再跑 `ZUPU_EMAIL=.. ZUPU_PASSWORD=.. node probes/gen-parity.mjs`。
 - **一次性数据迁移**:`SUPABASE_URL=... SUPABASE_SERVICE_ROLE=... node scripts/migrate.mjs <导出JSON> <原谱目录>`(service_role 只在本地命令行用一次,绝不入库)。
 
 ### 验证(无自动化测试 → 必须可执行对抗)
@@ -54,6 +55,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - AI 批量识别走 **Cloudflare Pages Function** `functions/api/ai-parse.js`(代理 DeepSeek;key 存 CF 环境变量 `DEEPSEEK_API_KEY`;只放行已登录的 editor JWT)。
 - 照片为**公开桶** `photos`(对象名 uuid 不可枚举);文字数据仍受 RLS。原谱影像在桶内 `yuanpu/p1..p4.jpg`(文件夹用拼音)。
 - 敏感字段 `contact`/`address`:分享模式 / 分享版 HTML / 脱敏导出里自动隐去,历史 diff 打码。
+
+### 模块契约(2026-07-07 健康度评审固化;此前全靠默契,多窗并行下必须成文)
+
+- **依赖方向严格单向:db.js ← app.js ← 功能模块**。前端一切 Supabase/网络 I/O 只准出现在 db.js(新后端交互=在 `api()` shim 加路由分支或挂命名空间方法);db.js 不得引用 app.js 符号。
+- **app.js 冻结为"核心+壳"**:新功能一律新模块文件,app.js 只加一行 `switchView` 弱引用 + 版本号;某段 app.js 区块连续 2 个 feature 版本被实质修改(>30 行)才按 v0.32 机制抽成模块,否则不动。
+- **state 键所有权**:模块对 state 共享键(persons/meta/四张关系映射/权限位)**只读**;模块私有键必须回 app.js 的 state 字面量集中登记(带属主注释),不许静默塞新键。
+- **app.js 调用后加载模块的符号一律带守卫**:`window.fn && window.fn(...)`(工具模块在 app 之后加载,裸调用=脚本失败时点击报错)。
+- **世代双实现契约**:app.js `genOf` 与 db.js `buildGenOf` 语义必须一致(页面 vs 导出),改任一侧必同步另一侧并跑 `probes/gen-parity.mjs`。
+- **CF Pages Functions**:门禁/Supabase 常量/上游错误处理**只准 import `functions/api/_shared.js`**,禁止内联;错误响应绝不回传上游响应体或模型原始输出;新表上线检查单=RLS 四动作显式策略+受控列守卫+桶默认私有+service_role 只进 CF 函数。
+- **角色断言只准经 `can_write()`/`can_minutes()` 助手**(SQL 与 CF 一致),禁止内联 role 字符串比较——v0.41 引入 admin 后已两次因内联 `'editor'` 漂移出真实故障(relationships.sql 2026-07-01、functions.sql 2026-07-07)。
 
 ## 已知坑(改前先看,省得重踩)
 

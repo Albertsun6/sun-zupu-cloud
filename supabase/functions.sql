@@ -2,7 +2,9 @@
 -- 孙氏族谱 · RPC 函数
 -- 在 schema.sql / policies.sql 之后运行。
 -- import_full:原子「导入/恢复」——清空全部表后从导出 JSON 重灌(对应本地版 import_full_json)。
---   仅 editor 可调用;仅恢复数据图,不恢复 Storage 图片(图片需另行上传)。
+--   可写角色(editor|admin,经 can_write())可调用;仅恢复数据图,不恢复 Storage 图片(图片需另行上传)。
+--   历史坑(2026-07-07 健康度评审 P1):此处曾硬编码 <> 'editor',v0.41 引入 admin 超集角色后漂移——
+--   admin 主账号点「上传JSON恢复」被拒。角色判定一律走 policies.sql 的 can_write()/can_minutes() 助手,禁止内联 role 字符串。
 -- =====================================================================
 create or replace function public.import_full(payload jsonb)
 returns jsonb
@@ -12,8 +14,8 @@ set search_path = public
 as $$
 declare p jsonb; pid text;
 begin
-  if (auth.jwt() #>> '{app_metadata,role}') <> 'editor' then
-    raise exception '需要 editor 权限';
+  if not public.can_write() then
+    raise exception '需要可写权限(editor 或 admin)';
   end if;
   if not (payload ? 'persons') then
     raise exception '不是有效的族谱备份 JSON(缺 persons)';
@@ -26,9 +28,10 @@ begin
 
   insert into public.meta(key, value) values ('meta', coalesce(payload->'meta','{}'::jsonb));
 
+  -- 列清单须与 db.js 的 EDITABLE/CSV_COLS 同步(2026-07-07 补 company——原漏,恢复会丢公司字段)
   insert into public.persons
     (id,gen,char_gen,name,alias,sex,birth,birth_lunar,birth_time,birth_place,death,death_lunar,alive,
-     rank,relation_type,kind,father_id,father_note,mother,spouse,occupation,residence,burial,
+     rank,relation_type,kind,father_id,father_note,mother,spouse,occupation,company,residence,burial,
      contact,address,deeds,source,status,note,photo,deleted,deleted_at,sort_order)
   select
      pj->>'id', coalesce(pj->>'gen',''), coalesce(pj->>'char_gen',''), coalesce(pj->>'name',''),
@@ -36,7 +39,7 @@ begin
      coalesce(pj->>'birth_lunar',''), coalesce(pj->>'birth_time',''), coalesce(pj->>'birth_place',''), coalesce(pj->>'death',''),
      coalesce(pj->>'death_lunar',''), coalesce(pj->>'alive',''), coalesce(pj->>'rank',''),
      coalesce(pj->>'relation_type',''), coalesce(pj->>'kind','本族'), coalesce(pj->>'father_id',''), coalesce(pj->>'father_note',''),
-     coalesce(pj->>'mother',''), coalesce(pj->>'spouse',''), coalesce(pj->>'occupation',''),
+     coalesce(pj->>'mother',''), coalesce(pj->>'spouse',''), coalesce(pj->>'occupation',''), coalesce(pj->>'company',''),
      coalesce(pj->>'residence',''), coalesce(pj->>'burial',''), coalesce(pj->>'contact',''),
      coalesce(pj->>'address',''), coalesce(pj->>'deeds',''), coalesce(pj->>'source',''),
      coalesce(pj->>'status',''), coalesce(pj->>'note',''), coalesce(pj->>'photo',''),

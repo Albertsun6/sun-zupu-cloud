@@ -4,8 +4,7 @@
 // 安全:① 仅放行已登录 editor(同 normalize-dates.js);② GLM key 存 CF 环境变量 GLM_API_KEY,绝不入库。
 //        未配置 GLM_API_KEY 时返回空 results(优雅降级,前端只是少了第二意见,不报错)。
 
-const SB_URL  = "https://ktalsyrxueabdisrszde.supabase.co";
-const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0YWxzeXJ4dWVhYmRpc3JzemRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1Mjc3MjYsImV4cCI6MjA5ODEwMzcyNn0.Chj8Zdn9BbK7PbpiEoa7iKDmuq_fSab019vL5X5vtPc";
+import { json, extractJson, requireWrite } from "./_shared.js";   // 门禁/常量统一走 _shared(本函数原本就不回传上游体,v0.26.1)
 
 const SYSTEM = `你是中文出生日期/时辰解析助手。把每个输入【拆成结构化字段】——你只负责拆,不做农历↔公历换算(换算由程序的万年历完成):
 - is_lunar: 农历日期=true(出现"初五""腊月""农历""闰X月",或日写成中文数字如"十一日""廿三"等农历写法);公历=false。生肖("属羊")/帝王年号/民国纪年通常配农历,按 true。
@@ -20,17 +19,9 @@ const SYSTEM = `你是中文出生日期/时辰解析助手。把每个输入【
 {"results":[{"input":"原文","is_lunar":false,"year":1979,"month":6,"day":5,"leap":false,"time":"09:00","ok":true,"note":""}]}
 results 顺序与输入一致、长度一致。`;
 
-function json(o, status){ return new Response(JSON.stringify(o), { status: status||200, headers: { "content-type": "application/json; charset=utf-8" } }); }
-function extractJson(s){ try{ return JSON.parse(s); }catch(e){} const a=s.indexOf("{"), b=s.lastIndexOf("}"); if(a>=0&&b>a){ try{ return JSON.parse(s.slice(a,b+1)); }catch(e){} } return null; }
-
 export async function onRequestPost({ request, env }){
   try{
-    const token = (request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"");
-    if(!token) return json({ error:"未登录" }, 401);
-    const ures = await fetch(SB_URL+"/auth/v1/user", { headers:{ apikey:SB_ANON, authorization:"Bearer "+token } });
-    if(!ures.ok) return json({ error:"登录校验失败,请重新登录" }, 401);
-    const user = await ures.json();
-    if(!["editor","admin"].includes((user&&user.app_metadata&&user.app_metadata.role)||"viewer")) return json({ error:"需要 editor 或 admin 权限" }, 403);
+    const gate = await requireWrite(request); if(gate.resp) return gate.resp;   // _shared 统一门禁(含 aud 校验)
 
     const body = await request.json().catch(()=>({}));
     const dates = Array.isArray(body.dates) ? body.dates.map(x=>String(x||"").trim()).filter(Boolean) : [];
