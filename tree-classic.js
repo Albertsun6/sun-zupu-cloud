@@ -49,13 +49,17 @@ function buildClassicForest(LIN){
     for (let i = 0; i < ka.length; i++){ if (ka[i] < kb[i]) return -1; if (ka[i] > kb[i]) return 1; } return 0; };
   const children = {};
   nodes.forEach(id => { const par = parentOf(id); if (par != null) (children[par] = children[par] || []).push(id); });
-  Object.keys(children).forEach(k => children[k].sort(cmp));
+  // 同父子女排序:**性别绝对优先**(男先女后,不掺世代)——同父本就同代,掺 genOf 会让锚点异常的姐妹插到兄弟前
+  const sibKey = id => { const p = byId(id) || {}; const so = parseInt(p.sort_order, 10); const yrm = (p.birth || "").match(/\d{4}/);
+    return [sexRank(p), yrm ? +yrm[0] : 9999, isNaN(so) ? 0 : so, id]; };
+  const sibCmp = (a, b) => { const ka = sibKey(a), kb = sibKey(b);
+    for (let i = 0; i < ka.length; i++){ if (ka[i] < kb[i]) return -1; if (ka[i] > kb[i]) return 1; } return 0; };
+  Object.keys(children).forEach(k => children[k].sort(sibCmp));
   // 根的排序键:世代锚点,无锚点视为 1(最老)——新补的始祖常没填世代,若按普通键(null=9999)会被排到断片之后、抢走最右"长房"位
   const rootKey = id => { const g = genOf(id); return g != null ? g : 1; };
   const roots = nodes.filter(id => parentOf(id) == null).sort((a, b) => rootKey(a) - rootKey(b) || cmp(a, b));
 
-  // 横坐标(raw,叶子计数):父框**压在长子正上方**(取 kids[0] 的 x,不再取中点)——
-  // 老祖宗主干因此成一条竖直线;整图再经镜像(见 renderClassicTree 的 mx)变成古式"长在右、自右向左读"。
+  // 横坐标(raw,叶子计数):父框**居中于子女**(中点);整图经镜像(renderClassicTree 的 mx)成古式"长在右、自右向左读"。
   const X = {}; const seen = new Set(); let leaf = 0;
   const assign = id => {
     if (seen.has(id)) return; seen.add(id);
@@ -63,7 +67,7 @@ function buildClassicForest(LIN){
     if (!kids.length){ X[id] = leaf++; return; }
     kids.forEach(assign);
     const xs = kids.filter(k => X[k] != null);
-    X[id] = xs.length ? X[xs[0]] : leaf++;   // 压长子正上方(长子 x = 本支最小叶,镜像后=本支最右)
+    X[id] = xs.length ? (X[xs[0]] + X[xs[xs.length - 1]]) / 2 : leaf++;   // 居中(v0.44 按用户要求,从"压长子"改回)
   };
   roots.forEach(assign);
   nodes.forEach(id => { if (X[id] == null) X[id] = leaf++; });
