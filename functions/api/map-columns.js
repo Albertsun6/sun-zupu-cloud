@@ -4,7 +4,7 @@
 // 出参:{ mapping:{ "0":"", "1":"company", "2":"name", ... } }   值=字段 key 或 ""(忽略)
 // 安全:仅放行已登录 editor;DeepSeek key 存 CF 环境变量 DEEPSEEK_API_KEY。人工最终审核,故为辅助建议。
 
-import { json, extractJson, requireWrite } from "./_shared.js";   // 门禁/常量统一走 _shared(本函数原本就不回传上游体)
+import { json, extractJson, requireWrite, upstreamError } from "./_shared.js";   // 门禁/常量/错误脱敏统一走 _shared(禁止内联)
 
 const SYSTEM = `你是表格列映射助手。用户给你:headers(一组表头名)、sample(每列一个样例值,与 headers 一一对应)、fields(目标字段列表,每项含 key 与中文 label)。
 为【每一列】选出最贴切的目标字段 key;明显不属于任何字段的列(如序号、证件类型/号码、年龄、ID 等)用空字符串 ""。
@@ -38,7 +38,7 @@ export async function onRequestPost({ request, env }){
           method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+key },
           body: JSON.stringify({ model, stream:false, temperature:0, response_format:{ type:"json_object" }, messages }), signal:ctrl.signal,
         });
-        if(!dres.ok){ await dres.text().catch(()=>""); throw new Error("DeepSeek 服务返回错误状态 "+dres.status); }
+        if(!dres.ok){ throw await upstreamError("DeepSeek", dres); }   // 脱敏:不回传上游响应体
         const data = await dres.json();
         return (data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||"";
       } finally { clearTimeout(t); }

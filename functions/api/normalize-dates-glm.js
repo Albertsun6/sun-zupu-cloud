@@ -4,7 +4,7 @@
 // 安全:① 仅放行已登录 editor(同 normalize-dates.js);② GLM key 存 CF 环境变量 GLM_API_KEY,绝不入库。
 //        未配置 GLM_API_KEY 时返回空 results(优雅降级,前端只是少了第二意见,不报错)。
 
-import { json, extractJson, requireWrite } from "./_shared.js";   // 门禁/常量统一走 _shared(本函数原本就不回传上游体,v0.26.1)
+import { json, extractJson, requireWrite, upstreamError } from "./_shared.js";   // 门禁/常量/错误脱敏统一走 _shared(禁止内联)
 
 const SYSTEM = `你是中文出生日期/时辰解析助手。把每个输入【拆成结构化字段】——你只负责拆,不做农历↔公历换算(换算由程序的万年历完成):
 - is_lunar: 农历日期=true(出现"初五""腊月""农历""闰X月",或日写成中文数字如"十一日""廿三"等农历写法);公历=false。生肖("属羊")/帝王年号/民国纪年通常配农历,按 true。
@@ -40,7 +40,7 @@ export async function onRequestPost({ request, env }){
           method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+key },
           body: JSON.stringify({ model, stream:false, temperature:0, response_format:{ type:"json_object" }, messages }), signal:ctrl.signal,
         });
-        if(!dres.ok){ await dres.text().catch(()=>""); throw new Error("GLM 服务返回错误状态 "+dres.status); }   // 不回传 GLM 响应体(可能含敏感信息)给客户端
+        if(!dres.ok){ throw await upstreamError("GLM", dres); }   // 脱敏:不回传 GLM 响应体(可能含敏感信息)给客户端
         const data = await dres.json();
         return (data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||"";
       } finally { clearTimeout(t); }

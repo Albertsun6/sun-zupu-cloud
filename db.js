@@ -50,9 +50,17 @@ async function selectAll(table, build){
   return out;
 }
 async function logHist(action, entity, entity_id, summary, before, after){
-  try{ await sb.from("history").insert({ ts:nowStr(), action, entity, entity_id:String(entity_id),
-    summary: summary||"", before: before!=null?JSON.stringify(before):"", after: after!=null?JSON.stringify(after):"", undone:0 }); }
-  catch(e){ console.warn("history 写入失败", e); }
+  // 注意:supabase-js v2 对 RLS 拒写/约束失败/网络失败一律 resolve 成 {error},【不抛异常】——
+  // 失败必须查返回值的 error 字段,靠 try/catch 是死代码(评审 P1 实证:403/网络断都进不了 catch)。
+  let failed=null;
+  try{ const r=await sb.from("history").insert({ ts:nowStr(), action, entity, entity_id:String(entity_id),
+    summary: summary||"", before: before!=null?JSON.stringify(before):"", after: after!=null?JSON.stringify(after):"", undone:0 });
+    if(r && r.error) failed=r.error;
+  }catch(e){ failed=e; }
+  if(failed){ console.warn("history 写入失败", failed);
+    // fail-loud:操作本身已成功,但这一步的撤销能力丢了——发事件让 UI 提示(db.js 不碰 DOM,app.js 监听)
+    try{ window.dispatchEvent(new CustomEvent("zupu:hist-fail",{ detail:{ summary: summary||"" } })); }catch(_){}
+  }
 }
 function dataUrlToBlob(dataUrl){
   const [meta, b64] = String(dataUrl).split(",");
@@ -377,13 +385,14 @@ window.api = api;
 //  - 调 CF 函数都带当前登录用户的 JWT,函数端各自再校验权限(纪要权限 / admin)。
 // ============================================================
 async function _jwt(){ const { data } = await sb.auth.getSession(); return (data.session && data.session.access_token) || ""; }
-async function _fn(path, body){
+async function _fn(path, body, opts){
   const tok = await _jwt();
-  const r = await fetch(path, { method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+tok }, body: JSON.stringify(body||{}) });
-  const d = await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error((d&&d.error)||("请求失败 "+r.status));
-  return d;
+  const r = await fetch(path, { method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+tok }, body: JSON.stringify(body||{}), signal: opts&&opts.signal });
+  const d = await r.json().catch(()=>null);   // null=响应体非 JSON(区别于空对象,供错误诊断)
+  if(!r.ok) throw new Error((d&&d.error)||("请求失败 "+r.status+(d===null?"(返回非JSON——CF 函数未部署?本地 http.server 预览没有 /api 代理)":"")));
+  return d||{};
 }
+window.CFN = _fn;   // CF 函数统一入口(JWT 自带,opts.signal 可传超时中断)——前端网络 I/O 收口 db.js,工具模块经此调 AI 函数,禁止再手写 fetch
 
 window.MINUTES = {
   list: async () => must(await sb.from("minutes").select("*").order("created_at",{ascending:false})),

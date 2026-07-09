@@ -8,6 +8,12 @@ let _minutes = [];
 let currentDetail = null;
 let rec = null;                 // 当前录音控制器
 const pollTimers = {};          // 转写轮询(按 minute id)
+let _wakeLock = null;           // 录音期间持屏幕唤醒锁,防手机息屏后系统掐掉录音(不支持的浏览器静默跳过)
+async function _acquireWakeLock(){
+  try{ if(navigator.wakeLock && !_wakeLock){ _wakeLock = await navigator.wakeLock.request("screen"); _wakeLock.addEventListener("release", ()=>{ _wakeLock=null; }); } }catch(e){}
+}
+function _releaseWakeLock(){ try{ if(_wakeLock){ _wakeLock.release(); _wakeLock=null; } }catch(e){} }
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible" && rec) _acquireWakeLock(); });   // 切走再切回,锁被系统释放→重新持有
 
 /* ---------- 小工具 ---------- */
 function ensureMask(id){
@@ -256,6 +262,7 @@ async function startRecording(id){
       ctl={ stream, mime:"audio/wav", ext:"wav", mode:"wav", stop:async()=>w.stop() };
     }
     rec={ ...ctl, start:Date.now() };
+    _acquireWakeLock();   // A1-2:录音中防息屏
     document.getElementById("recStart").style.display="none";
     const stopBtn=document.getElementById("recStop"), tEl=document.getElementById("recTime");
     stopBtn.style.display=""; tEl.style.display="";
@@ -268,6 +275,7 @@ async function startRecording(id){
 async function stopRecording(id){
   if(!rec) return;
   clearInterval(rec.timer);
+  _releaseWakeLock();
   const dur=Math.floor((Date.now()-rec.start)/1000), msg=document.getElementById("recMsg");
   msg.className="hint"; msg.textContent="处理录音…";
   let blob; try{ blob=await rec.stop(); }catch(e){ msg.className="err"; msg.textContent="录音失败:"+e.message; rec=null; return; }
@@ -297,9 +305,23 @@ async function recoverRecording(id){
     if(!blobs.length){ msg.className="err"; msg.textContent="分片下载失败"; return; }
     const type=blobs[0].type||"audio/webm", ext=mimeExt(type);
     const full=new Blob(blobs,{type});
-    const estDur=segs.length*180;   // 崩溃恢复无精确时长 → 按段数估(每段 3 分钟);略高估→>2h 时偏向"关分人"(Fun-ASR 开分人仅 ≤2h,高估更安全,避免转写被拒)
+    // 时长:优先让浏览器解码出真实时长(B7-2);解不出(编码残缺等)再按段数估(每段3分钟,略高估→>2h 偏向"关分人",Fun-ASR 开分人仅 ≤2h,更安全)
+    const estDur = (await _blobDuration(full)) || segs.length*180;
     await uploadAndAttach(id, new File([full],"recording."+ext,{type}), estDur);
   }catch(e){ msg.className="err"; msg.textContent="恢复失败:"+e.message; }
+}
+// 读一段音频 Blob 的真实时长(秒);解不出/超时返回 0(调用方回退估算)。
+// 注:MediaRecorder 的 webm 常无时长头(duration=Infinity)→ 用"跳到极大时间点再读"迫使浏览器算出真实值(Chrome 惯用法)。
+function _blobDuration(blob){
+  return new Promise(res=>{
+    const url=URL.createObjectURL(blob), a=new Audio();
+    let settled=false;
+    const done=v=>{ if(settled) return; settled=true; clearTimeout(to); URL.revokeObjectURL(url); res((v>0&&isFinite(v))?Math.round(v):0); };
+    const to=setTimeout(()=>done(0), 8000);
+    a.onloadedmetadata=()=>{ if(a.duration===Infinity){ a.currentTime=1e7; a.ontimeupdate=()=>{ a.ontimeupdate=null; done(a.duration); }; } else done(a.duration); };
+    a.onerror=()=>done(0);
+    a.preload="metadata"; a.src=url;
+  });
 }
 
 /* ---------- 转写 + 轮询 ---------- */

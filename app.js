@@ -35,7 +35,7 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.48.0";
+const APP_VERSION = "v0.49.0";
 const APP_DATE = "2026-07-09";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
@@ -47,9 +47,20 @@ const DIRECT_LINE = new Set(["S001","S002","S004","S008","S010","S014","S019","S
 const ORIG_IMG = {p1:window.photoUrl("yuanpu/p1.jpg"),p2:window.photoUrl("yuanpu/p2.jpg"),p3:window.photoUrl("yuanpu/p3.jpg"),p4:window.photoUrl("yuanpu/p4.jpg")};
 const UNDOABLE = window.UNDOABLE;   // 单一真源:db.js 定义并挂 window(先于 app.js 加载);不再自持第二份,防「后端能撤但前端不显示撤销按钮」的漂移
 
+// 历史留痕写入失败的 fail-loud 提示(db.js logHist 发事件):改动已保存,但这一步撤销不了——必须让人当场知道
+window.addEventListener("zupu:hist-fail", e=>{
+  let t=document.getElementById("histFailTip");
+  if(!t){ t=document.createElement("div"); t.id="histFailTip";
+    t.style.cssText="position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#b91c1c;color:#fff;padding:8px 14px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:90vw";
+    document.body.appendChild(t); }
+  const s=e.detail&&e.detail.summary;
+  t.textContent="⚠ 改动已保存,但历史留痕写入失败——这一步无法在「操作历史」里撤销"+(s?("("+s+")"):"");
+  t.style.display="block"; clearTimeout(t._h); t._h=setTimeout(()=>{ t.style.display="none"; },8000);
+});
+
 const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[], relTypes:[], relCount:{}, q:"", share:false,
                 editing:null, user:null, canEdit:false, isAdmin:false, canMinutes:false, lineage:"",
-                graphCenter:"", graphHops:2, pathA:"", pathB:"",
+                graphCenter:"", graphHops:2, pathA:"", pathB:"", graphForceFull:false,   // graphForceFull=用户在 >500 人护栏页点了"仍要渲染全图"
                 fatherOf:{}, motherOf:{}, childrenMap:{}, spouseOf:{}, _genCache:{}, _lineageCache:{}, lineages:null,
                 filters:{charGen:"",status:"",alive:""}, customFilters:[],
                 treeMode:null, classicLineage:null, classicZoom:null,   // classicZoom=null ⇒ 传统谱图默认"适应整页"
@@ -1128,6 +1139,15 @@ async function renderGraph(){
   }
   const pt=$("#graphPathText"); if(pt) pt.innerHTML=pathText;
   const show = visible || idset;
+  // 护栏:无中心人物、也没在查关系链的全图,人多时力导向布局会卡住页面 → >500 人默认不渲染,引导用局部圈(可强制)
+  if(!visible && !pathSet && persons.length>500 && !state.graphForceFull){
+    box.innerHTML=`<div style="padding:1.2rem;max-width:36em">
+      <p>当前共 <b>${persons.length}</b> 人,一次画全图会明显卡顿。建议用上方「🎯局部圈」选一个中心人物,看 TA 周围几跳的关系。</p>
+      <p><button class="btn" id="graphForceBtn">仍要渲染全图(可能卡顿数秒)</button></p></div>`;
+    const gl=$("#graphLegend"); if(gl) gl.innerHTML="";   // 清掉上次渲染残留的图例(此时点图例只改 state 无反馈,且筛类型解不开按人数判的护栏)
+    const fb=$("#graphForceBtn"); if(fb) fb.onclick=()=>{ state.graphForceFull=true; renderGraph(); };
+    return;
+  }
   const deg={}; edges.forEach(r=>{ deg[r.from_id]=(deg[r.from_id]||0)+1; deg[r.to_id]=(deg[r.to_id]||0)+1; });
   const dimNode = id => pathSet && !pathSet.has(id);
   const nodes=persons.filter(p=>show===idset||show.has(p.id)).map(p=>{
