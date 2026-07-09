@@ -56,3 +56,7 @@ end $$;
 
 -- 4) recordings 桶单文件上限提到 200MB(5h 低码率 opus ≈ 50-70MB,原默认 50MB 不够)。
 update storage.buckets set file_size_limit = 209715200 where id = 'recordings';   -- 200 MiB
+
+-- 自登记(迁移追踪;schema_migrations 未建时静默跳过)
+insert into public.schema_migrations(version) select 'minutes-v042'
+  where to_regclass('public.schema_migrations') is not null on conflict (version) do nothing;

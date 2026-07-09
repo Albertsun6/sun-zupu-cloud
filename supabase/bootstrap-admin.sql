@@ -12,3 +12,7 @@ where email = 'albertsun6@gmail.com';   -- ← 改成你的管理员邮箱
 -- 核对(应看到 role=admin、perms 含 minutes):
 -- select email, raw_app_meta_data->>'role' as role, raw_app_meta_data->'perms' as perms
 --   from auth.users where email = 'albertsun6@gmail.com';
+
+-- 自登记(迁移追踪;schema_migrations 未建时静默跳过)
+insert into public.schema_migrations(version) select 'bootstrap-admin'
+  where to_regclass('public.schema_migrations') is not null on conflict (version) do nothing;

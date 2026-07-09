@@ -100,3 +100,7 @@ end $$;
 
 revoke all on function public.import_full(jsonb) from anon, public;
 grant execute on function public.import_full(jsonb) to authenticated;
+
+-- 自登记(迁移追踪;schema_migrations 未建时静默跳过)
+insert into public.schema_migrations(version) select 'functions'
+  where to_regclass('public.schema_migrations') is not null on conflict (version) do nothing;

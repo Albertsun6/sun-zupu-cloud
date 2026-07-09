@@ -85,3 +85,7 @@ insert into public.relationships(from_id, to_id, type, directed, note)
     and coalesce(p.father_id,'') <> ''
     and exists (select 1 from public.persons f where f.id = p.father_id)
   on conflict (from_id,to_id,type) do nothing;
+
+-- 自登记(迁移追踪;schema_migrations 未建时静默跳过)
+insert into public.schema_migrations(version) select 'relationships'
+  where to_regclass('public.schema_migrations') is not null on conflict (version) do nothing;

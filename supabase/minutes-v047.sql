@@ -17,3 +17,7 @@ alter table public.minutes add constraint minutes_speaker_names_ck
 
 -- 说明:无需改 minutes_guard_cols —— 该守卫只把它显式列出的受控列(status/asr_*/transcript*/audio_*/
 -- diarized/segment_count 等)强制为安全值,不在清单里的列(title/meeting_at/note/speaker_names)客户端可写。
+
+-- 自登记(迁移追踪;schema_migrations 未建时静默跳过)
+insert into public.schema_migrations(version) select 'minutes-v047'
+  where to_regclass('public.schema_migrations') is not null on conflict (version) do nothing;
