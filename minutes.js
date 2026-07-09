@@ -85,9 +85,13 @@ function transcribeBtnHtml(m){
     return `<button class="btn btn-primary btn-sm" id="trGo">${m.status==="failed"?"重试转写":"开始转写(AI)"}</button>`+(m.status==="failed"&&m.asr_error?`<div class="err">${esc(m.asr_error)}</div>`:"");
   return "";
 }
-function transcriptHtml(segs, transcript){
+// 说话人显示名:有真名映射(minutes.speaker_names)就显真名,否则「说话人N」。名字封顶 40 字、非对象 map 当空(与后端一致)。
+function speakerName(spk, names){ if(spk==null||spk==="") return ""; const map=(names&&typeof names==="object")?names:{}; const nm=map[String(spk)]; return (nm&&String(nm).trim())?String(nm).trim().slice(0,40):("说话人"+spk); }
+function hasSpk(s){ return s.speaker!=null && s.speaker!==""; }
+function transcriptHtml(segs, transcript, names){
+  names=names||{};
   if(Array.isArray(segs)&&segs.length)
-    return `<div class="tlist">`+segs.map(s=>`<div class="tseg" data-start="${s.start||0}"><span class="tt">${fmtDur(s.start||0)}</span>${s.speaker?`<span class="tspk">说话人${esc(s.speaker)}</span>`:""}<span class="ttx">${esc(s.text||"")}</span></div>`).join("")+`</div>`;
+    return `<div class="tlist">`+segs.map(s=>`<div class="tseg" data-start="${s.start||0}"><span class="tt">${fmtDur(s.start||0)}</span>${hasSpk(s)?`<span class="tspk" data-spk="${esc(String(s.speaker))}" title="点我给这位说话人起名(全场同步)">${esc(speakerName(s.speaker,names))}</span>`:""}<span class="ttx">${esc(s.text||"")}</span></div>`).join("")+`</div>`;
   if(transcript) return `<div class="tplain">${esc(transcript).replace(/\n/g,"<br>")}</div>`;
   return "<span class='hint'>—(尚无转写)</span>";
 }
@@ -121,7 +125,8 @@ function detailHtml(m){
     <div class="mdet-sec"><div class="dsec-h">📝 转写文字 ${m.status==="transcribing"?'<span class="hint" id="trMsg">转写中…(可关闭页面,稍后回来查看)</span>':""}</div>
       ${transcribeBtnHtml(m)}
       ${(m.status==="transcribed"&&m.diarized===false&&((m.transcript||"").trim()||segs.length))?'<div class="hint">ℹ️ 本次录音超过 2 小时,未做说话人分离,仅文字。</div>':""}
-      <div id="transcriptBox">${transcriptHtml(segs, m.transcript)}</div></div>
+      ${(m.status==="transcribed"&&segs.some(hasSpk))?'<div class="hint" style="margin:.3rem 0">💡 点转写里的<b>说话人名字</b>可改成真名(全场同步)。<button class="btn btn-sm" id="spkGuess">🤖 让 AI 猜说话人</button></div>':""}
+      <div id="transcriptBox">${transcriptHtml(segs, m.transcript, m.speaker_names)}</div></div>
 
     <div class="mdet-sec ai-sec"><div class="dsec-h">🤖 AI 整理(DeepSeek)</div>
       <div class="hint">基于转写文字生成,需先完成转写。</div>
@@ -144,6 +149,48 @@ function bindDetail(m){
   if(up&&uf){ up.onclick=()=>uf.click(); uf.onchange=()=>{ if(uf.files[0]) uploadAndAttach(m.id, uf.files[0], 0); }; }
   document.querySelectorAll(".aiGen").forEach(b=> b.onclick=()=>genAI(m.id, b.dataset.kind, b));
   document.querySelectorAll(".tseg").forEach(s=> s.onclick=()=>{ const a=document.getElementById("mAudio"); if(a){ a.currentTime=+s.dataset.start||0; a.play().catch(()=>{}); } });
+  document.querySelectorAll(".tspk").forEach(s=> s.onclick=(e)=>{ e.stopPropagation(); renameSpeaker(m, s.dataset.spk); });   // 阻止冒泡到 .tseg(那是跳播放)
+  const gs=document.getElementById("spkGuess"); if(gs) gs.onclick=()=>guessSpeakers(m, gs);
+}
+
+/* ---------- 说话人改名(v0.47:点名字改真名,存 minutes.speaker_names,同编号全场同步)---------- */
+async function saveSpeakerNames(id, names){ await window.MINUTES.update(id, { speaker_names: names }); await openMinuteDetail(id); }
+async function renameSpeaker(m, spk){
+  const cur=(m.speaker_names&&m.speaker_names[spk])||"";
+  const nv=prompt("给「说话人"+spk+"」起个真名(全场同一说话人会一起改;留空=恢复成编号):", cur);
+  if(nv===null) return;   // 取消
+  const base=(m.speaker_names&&typeof m.speaker_names==="object")?m.speaker_names:{};
+  const names={...base}; const v=nv.trim().slice(0,40);   // 封顶 40 字(与后端/DB 约束一致)
+  if(v) names[spk]=v; else delete names[spk];
+  try{ await saveSpeakerNames(m.id, names); }catch(e){ alert("改名失败:"+e.message+"(名字过长或格式不对会被数据库拒绝)"); }
+}
+async function guessSpeakers(m, btn){
+  if(btn){ btn.disabled=true; btn.textContent="AI 猜测中…"; }
+  try{ const props=await window.MINUTES.guessSpeakers(m.id); openSpeakerGuess(m, props); }
+  catch(e){ alert("猜测失败:"+e.message); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent="🤖 让 AI 猜说话人"; } }
+}
+function openSpeakerGuess(m, props){
+  const mask=ensureMask("spkGuessMask");
+  const rows = (props&&props.length) ? props.map(p=>{
+    const cur=(m.speaker_names&&m.speaker_names[p.speaker])||"";
+    return `<div class="mergerow" style="display:block;padding:.4rem 0">
+      <b>说话人${esc(p.speaker)}</b>${cur?` <span class="hint">(当前:${esc(cur)})</span>`:""}
+      ${p.name?`&nbsp;→&nbsp;建议 <b style="color:#047857">${esc(p.name)}</b> <button class="btn btn-sm spkAccept" data-spk="${esc(p.speaker)}" data-name="${esc(p.name)}">采纳</button>`:`&nbsp;<span class="hint">拿不准,建议留空(可手动改)</span>`}
+      ${p.reason?`<div class="hint">依据:${esc(p.reason)}</div>`:""}
+    </div>`;
+  }).join("") : '<div class="hint">没有可猜的说话人(未做说话人分离,或无对话内容)。</div>';
+  mask.querySelector(".modal").innerHTML=`<h2>🤖 AI 猜说话人</h2>
+    <p class="hint">仅根据对话内容(谁被喊名字/自报身份)推测,<b>可能不准</b>;点「采纳」才写入,写入后仍可手动改。</p>
+    <div style="max-height:52vh;overflow:auto">${rows}</div>
+    <div class="modal-foot"><span class="spacer"></span><button class="btn" id="spkClose">关闭</button></div>`;
+  mask.classList.add("open");
+  document.getElementById("spkClose").onclick=()=>mask.classList.remove("open");
+  mask.onclick=e=>{ if(e.target===mask) mask.classList.remove("open"); };
+  mask.querySelectorAll(".spkAccept").forEach(b=>b.onclick=async()=>{
+    const names={...(m.speaker_names||{})}; names[b.dataset.spk]=b.dataset.name;
+    try{ mask.classList.remove("open"); await saveSpeakerNames(m.id, names); }catch(e){ alert("采纳失败:"+e.message); }
+  });
 }
 function openEditMinute(m){
   const mask=ensureMask("minuteEditMask");

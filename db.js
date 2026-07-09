@@ -420,6 +420,7 @@ window.MINUTES = {
   transcribe: async (id) => _fn("/api/minutes", { action:"transcribe", minuteId:id }),
   pollStatus: async (id) => _fn("/api/minutes", { action:"transcribe-status", minuteId:id }),
   ai:         async (id, kind) => _fn("/api/minutes", { action:"ai", minuteId:id, kind }),
+  guessSpeakers: async (id) => (await _fn("/api/minutes", { action:"guess-speakers", minuteId:id })).proposals || [],
 };
 
 window.ADMIN = {

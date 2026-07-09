@@ -84,14 +84,50 @@ export function parseAsr(result) {
   return out;
 }
 function fmtTime(sec) { sec = Math.max(0, Math.floor(sec || 0)); const m = Math.floor(sec / 60), s = sec % 60; return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s; }
-function transcriptForAI(m) {
-  const segs = Array.isArray(m.transcript_json) ? m.transcript_json : [];
-  let body = segs.length
-    ? segs.map(s => "[" + fmtTime(s.start) + (s.speaker ? " 说话人" + s.speaker : "") + "] " + (s.text || "")).join("\n")
-    : (m.transcript || "");
-  if (body.length > 12000) body = body.slice(0, 12000) + "\n…(转写过长已截断)";
-  return body;
+// 说话人显示名:优先 speaker_names 映射的真名,否则「说话人N」。names 为 {"0":"孙德龙",...}。导出以便探针。
+export function speakerLabel(spk, names) {
+  if (spk == null || spk === "") return "";
+  const map = (names && typeof names === "object") ? names : {};   // 防 '"abc"' 这类非对象值被当索引
+  const nm = map[String(spk)];
+  const v = (nm && String(nm).trim()) ? String(nm).trim().slice(0, 40) : "";   // 名字封顶 40 字,防超长名注入撑爆 AI prompt
+  return v || ("说话人" + spk);
 }
+// 把转写拆成【逐段行】(注入真名),供 AI 用。无分段则按换行粗切。单行过长再硬切,防某行撑爆分块。
+export function transcriptSegLines(m, maxLineChars) {
+  const names = (m.speaker_names && typeof m.speaker_names === "object") ? m.speaker_names : {};
+  const segs = Array.isArray(m.transcript_json) ? m.transcript_json : [];
+  let lines;
+  if (segs.length) {
+    lines = segs.map(s => { const lab = speakerLabel(s.speaker, names); return "[" + fmtTime(s.start) + (lab ? " " + lab : "") + "] " + (s.text || ""); });
+  } else {
+    lines = String(m.transcript || "").split(/\n+/).map(x => x.trim()).filter(Boolean);
+  }
+  const cap = maxLineChars || 4000, out = [];
+  for (const ln of lines) { if (ln.length <= cap) out.push(ln); else for (let i = 0; i < ln.length; i += cap) out.push(ln.slice(i, i + cap)); }
+  return out;
+}
+// 把逐段行按 ≤maxChars 分块(在段边界切,不断句)。返回块字符串数组。
+export function chunkLines(lines, maxChars) {
+  const chunks = []; let cur = "";
+  for (const ln of lines) {
+    if (cur && (cur.length + 1 + ln.length) > maxChars) { chunks.push(cur); cur = ""; }
+    cur = cur ? cur + "\n" + ln : ln;
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+// 兼容旧单次路径:整段文本(≤12000 直接用,超长交给 ai action 的 map-reduce,不在此截断)
+function transcriptForAI(m) { return transcriptSegLines(m).join("\n"); }
+
+const AI_MAXCHUNKS = 8;      // 分块上限(每块≤10k → 覆盖约 80k 字≈5-6h;超出取前 8 块并注明)
+const AI_CHUNKCHARS = 10000; // 单块目标字符数
+// 长转写 map 阶段:把一段压成要点(summary/mindmap 共用)
+const MAP_DIGEST_SYS = "你在处理一场较长会议转写的其中一段。把这一段压缩成【要点】:讨论了什么、形成的决定、待办事项,尽量保留谁在大致第几分钟说了什么。只输出简洁要点文本,不加客套、不重复原文。";
+// 长转写 reduce 阶段:把各段要点合并成最终产物
+const REDUCE_SYS = {
+  summary: "下面是一场会议按时间顺序分成若干段、各自生成的【要点】。请合并去重,输出一份完整的中文会议纪要:① 一句话概述;② 关键讨论点(可标注大致第几分钟、谁说的);③ 形成的决定;④ 待跟进事项。只输出 Markdown 文本,不要代码块包裹。忠于要点,不编造。",
+  mindmap: "下面是一场会议分段生成的【要点】。据此整理成层级脑图。只输出 mermaid 的 mindmap 语法:第一行是 mindmap,然后 root((会议主题)),再用缩进表示层级(2~3 层)。只输出 mermaid 代码本身,不要 ``` 包裹、不要任何解释。节点文字简短,避免特殊符号 ()[]{} 与引号。",
+};
 
 const AI_SYS = {
   summary: "你是中文会议纪要助手。根据下面带时间戳/说话人的会议转写,输出结构化中文摘要,含:① 一句话概述;② 关键讨论点(可标注大致在第几分钟、谁说的);③ 形成的决定;④ 待跟进事项。只输出 Markdown 文本,不要代码块包裹。忠于原文,不编造。",
@@ -260,21 +296,65 @@ export async function onRequestPost({ request, env }) {
       return json({ ok: true, status: "transcribing", task_status: st || "PENDING" });
     }
 
-    // ---------- DeepSeek:摘要 / 任务 / 脑图 ----------
+    // ---------- DeepSeek:摘要 / 任务 / 脑图(长转写自动 map-reduce 分块,不再 12000 字截断)----------
     if (action === "ai") {
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
       const kind = body.kind;
       if (!AI_SYS[kind]) return json({ error: "未知 kind" }, 400);
       const m = await getMinute(token, id); if (!m) return json({ error: "纪要不存在或无权限" }, 404);
-      const text = transcriptForAI(m);
-      if (!text.trim()) return json({ error: "没有可用的转写文本,请先转写" }, 400);
-      const content = await deepseek(env, AI_SYS[kind], text);
+      const lines = transcriptSegLines(m);
+      const full = lines.join("\n");
+      if (!full.trim()) return json({ error: "没有可用的转写文本,请先转写" }, 400);
+
+      let content;
+      if (full.length <= 12000) {
+        content = await deepseek(env, AI_SYS[kind], full);   // 短转写:单次调用(与旧行为一致,无额外成本)
+      } else {
+        // 长转写:按段边界分块 → map(逐块)→ reduce(合并);块数封顶 AI_MAXCHUNKS,超出注明
+        let chunks = chunkLines(lines, AI_CHUNKCHARS);
+        const truncated = chunks.length > AI_MAXCHUNKS;
+        if (truncated) chunks = chunks.slice(0, AI_MAXCHUNKS);
+        if (kind === "tasks") {
+          // tasks 的 reduce 用 JS 合并去重(无需二次 LLM,确定且省钱)。去重键含 owner:同任务不同负责人算两条。
+          const merged = [], seen = new Set();
+          for (const ch of chunks) {
+            const j = extractJson(await deepseek(env, AI_SYS.tasks, ch));
+            for (const t of (j && Array.isArray(j.tasks) ? j.tasks : [])) {
+              const tk = String((t && t.task) || "").trim(); if (!tk) continue;
+              const key = tk + "|" + String((t && t.owner) || "").trim(); if (seen.has(key)) continue; seen.add(key); merged.push(t);
+            }
+          }
+          if (truncated) merged.push({ task: "(注:会议过长,仅提取了前 " + AI_MAXCHUNKS + " 段的行动项,后段未处理)", owner: "", due: "" });
+          content = JSON.stringify({ tasks: merged });
+        } else {
+          const digests = [];
+          for (let i = 0; i < chunks.length; i++) digests.push("【第" + (i + 1) + "段】\n" + await deepseek(env, MAP_DIGEST_SYS, chunks[i]));
+          if (truncated) digests.push("(注:会议过长,仅处理了前 " + AI_MAXCHUNKS + " 段要点)");
+          content = await deepseek(env, REDUCE_SYS[kind], digests.join("\n\n"));
+        }
+      }
+
       let patch = {}, ret = {};
       if (kind === "summary") { patch = { summary: content.trim() }; ret = { summary: content.trim() }; }
       else if (kind === "tasks") { const j = extractJson(content); const tasks = (j && Array.isArray(j.tasks)) ? j.tasks : []; patch = { tasks }; ret = { tasks }; }
       else if (kind === "mindmap") { const mm = normalizeMindmap(content); patch = { mindmap: mm }; ret = { mindmap: mm }; }
       await restSvc("PATCH", env, "/minutes?id=eq." + id, patch);
       return json({ ok: true, ...ret });
+    }
+
+    // ---------- AI 猜说话人:仅据对话内容(互相称呼/自报身份)推测真名,返回建议不落库,前端逐条采纳 ----------
+    if (action === "guess-speakers") {
+      const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
+      const m = await getMinute(token, id); if (!m) return json({ error: "纪要不存在或无权限" }, 404);
+      const segs = Array.isArray(m.transcript_json) ? m.transcript_json : [];
+      const speakers = [...new Set(segs.map(s => s.speaker).filter(x => x != null && x !== ""))];
+      if (!speakers.length) return json({ ok: true, proposals: [] });   // 未分说话人(如 >2h 只出文字)
+      let body2 = segs.map(s => "[说话人" + s.speaker + "] " + (s.text || "")).join("\n");
+      if (body2.length > 12000) body2 = body2.slice(0, 12000);   // 猜名取前段足够,不必全量
+      const sys = "你是会议转写分析助手。下面是一段带「说话人0/1/…」编号的对话。请【仅根据对话内容本身】(谁被喊了名字、谁自报身份、亲属/职务称呼线索)推测每个说话人的真名。拿不准就把 name 留空,绝不编造。只输出 JSON 对象:{\"proposals\":[{\"speaker\":\"0\",\"name\":\"推测的名字或空\",\"reason\":\"简短依据(引用对话里的线索)\"}]}。为出现过的每个说话人各给一条。";
+      const j = extractJson(await deepseek(env, sys, body2));
+      const proposals = (j && Array.isArray(j.proposals)) ? j.proposals.filter(p => p && p.speaker != null).map(p => ({ speaker: String(p.speaker), name: String(p.name || "").trim(), reason: String(p.reason || "").trim() })) : [];
+      return json({ ok: true, proposals });
     }
 
     // ---------- 删除纪要:清空本纪要名下全部录音对象(service_role)→ 删分片台账 → 删行(调用者 JWT,RLS 兜底)----------
