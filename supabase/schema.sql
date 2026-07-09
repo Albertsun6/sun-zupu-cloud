@@ -140,3 +140,7 @@ create index if not exists minutes_created_idx on public.minutes(created_at desc
 -- 建表即锁(fail-closed):RLS 就地启用——即使漏跑 minutes.sql(策略在那边),该表也默认全拒而非裸奔。
 -- (2026-07-07 健康度评审 P5:曾有"照过期文档重建库 → minutes 建了表但 RLS 未开"的窗口)
 alter table public.minutes enable row level security;
+
+-- 自登记(迁移追踪;schema_migrations 未建时静默跳过)
+insert into public.schema_migrations(version) select 'schema'
+  where to_regclass('public.schema_migrations') is not null on conflict (version) do nothing;

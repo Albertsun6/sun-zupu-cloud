@@ -97,3 +97,7 @@ drop policy if exists "recordings minutes update" on storage.objects;
 drop policy if exists "recordings minutes delete" on storage.objects;
 create policy "recordings minutes select" on storage.objects for select to authenticated
   using (bucket_id='recordings' and public.can_minutes());
+
+-- 自登记(迁移追踪;schema_migrations 未建时静默跳过)
+insert into public.schema_migrations(version) select 'minutes'
+  where to_regclass('public.schema_migrations') is not null on conflict (version) do nothing;

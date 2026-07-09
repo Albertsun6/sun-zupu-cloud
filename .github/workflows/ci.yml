@@ -1,0 +1,34 @@
+name: ship-checks
+
+# 静态门禁的【事后兜底】:push / PR 自动重跑本地那套检查,抓多窗 AI 漏掉的角色字面量/版本双改/退役列坑。
+# 注意:push main 时 Cloudflare Pages 并行部署,CI 红≠拦住上线——发版前的硬门禁仍是本地跑 probes/ship-checks.sh(/zupu-ship 清单)。
+# 全是零依赖 grep + node --check + 只读探针,不需要任何 secret。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ship-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # 必须 >=22.7:仓库 .js 无 package.json 却用 ESM(import/export),
+          # 靠 Node 的模块语法自动探测;Node 20 的 --check 按 CommonJS 解析会全炸。
+          node-version: "24"
+      - name: probes/ship-checks.sh(角色字面量 / raw 回传 / I-O 收口 / 版本双改 / SQL 自登记 …)
+        run: bash probes/ship-checks.sh
+      - name: node --check 全部 JS / MJS
+        run: |
+          set -e
+          for f in $(git ls-files '*.js' '*.mjs'); do node --check "$f"; done
+          echo "all JS/MJS syntax OK"
+      # 线上库漏跑迁移核对:只用仓库里的公开 anon key,无需 secret。
+      # 提醒性(continue-on-error):新 SQL 合进 main 到用户在 Supabase 跑它之间,这步黄着提醒,不把整个 CI 弄红。
+      - name: check-migrations(线上库 vs 仓库 SQL;提醒性不挡门)
+        continue-on-error: true
+        run: node probes/check-migrations.mjs
+      # 注:gen-parity.mjs 需登录凭证读真实库,不进 CI(不把账号密码放 GitHub secret);它是本地发版前手动探针。

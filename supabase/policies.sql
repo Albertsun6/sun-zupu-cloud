@@ -66,3 +66,7 @@ create policy "photos editor delete" on storage.objects for delete to authentica
 -- 公开桶的 select 不需策略(公开可读)。
 
 -- 纪要相关 RLS(minutes 表 + recordings 私有桶)见 minutes.sql(本文件之后运行)。
+
+-- 自登记(迁移追踪;schema_migrations 未建时静默跳过)
+insert into public.schema_migrations(version) select 'policies'
+  where to_regclass('public.schema_migrations') is not null on conflict (version) do nothing;

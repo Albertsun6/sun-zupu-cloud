@@ -1,0 +1,13 @@
+# Cloudflare Pages 会把仓库根全部静态供网(实测 schema.sql/probes 都能被公网下载)。
+# 非前端文件一律 302 回首页——仓库本就无密钥(铁律),这里挡的是信息面(表结构/策略/内部报告)。
+# 新增非前端目录时记得补一行。
+/supabase/* / 302
+/probes/* / 302
+/backup-worker/* / 302
+/scripts/* / 302
+/docs/* / 302
+/.github/* / 302
+/FEATURES.md / 302
+/CLAUDE.md / 302
+/README.md / 302
+/.gitignore / 302

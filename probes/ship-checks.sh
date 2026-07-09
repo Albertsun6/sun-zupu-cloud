@@ -18,8 +18,8 @@ HITS=$(grep -rn '"editor"' functions/api/*.js 2>/dev/null | grep -v '_shared.js'
 [ -z "$HITS" ] && ok "CF 函数无内联角色判定(统一走 _shared)" || bad "CF 函数内联角色判定:
 $HITS"
 
-# 2) CF 函数错误脱敏:响应里不得回传上游 body/模型原始输出(raw: 字段);_shared 豁免
-HITS=$(grep -rn 'raw:' functions/api/*.js 2>/dev/null | grep -v '_shared.js' || true)
+# 2) CF 函数错误脱敏:响应里不得回传上游 body/模型原始输出(raw: 字段);_shared 豁免;backup-worker 同查
+HITS=$(grep -rn 'raw:' functions/api/*.js backup-worker/*.js 2>/dev/null | grep -v '_shared.js' || true)
 [ -z "$HITS" ] && ok "CF 函数无 raw: 回传" || bad "CF 函数把模型原始输出回传给客户端:
 $HITS"
 
@@ -29,22 +29,24 @@ HITS=$(grep -n 'sb\.from\|sb\.auth\|sb\.storage\|sb\.rpc' ./*.js 2>/dev/null | g
 $HITS"
 
 # 4) 版本双改:APP_VERSION 与 index.html 全部 ?v= 一致
+#    按"出现次数"数(非行数,同一行两个标签也数得清);两侧模式对称(任何带 ?v=数字 的资源都算,不限 .js)
 V=$(grep -o 'APP_VERSION = "v[0-9.]*"' app.js | grep -o '[0-9.]*' | head -1)
-NTAG=$(grep -c "?v=$V" index.html || true)
-NALL=$(grep -c '\.js?v=' index.html || true)
-[ -n "$V" ] && [ "$NTAG" = "$NALL" ] && ok "版本一致:v$V(?v= 命中 $NTAG/$NALL)" || bad "版本双改没做全:APP_VERSION=v$V 但 ?v=$V 命中 $NTAG/$NALL(见 CLAUDE.md 改版本必做)"
+NTAG=$(grep -o "?v=$V\"" index.html | wc -l | tr -d ' ')
+NALL=$(grep -o '?v=[0-9][0-9.]*"' index.html | wc -l | tr -d ' ')
+[ -n "$V" ] && [ "$NTAG" = "$NALL" ] && [ "$NTAG" != "0" ] && ok "版本一致:v$V(?v= 命中 $NTAG/$NALL)" || bad "版本双改没做全:APP_VERSION=v$V 但 ?v=$V 命中 $NTAG/$NALL(见 CLAUDE.md 改版本必做)"
 
 # 5) SQL 运行顺序文档一致:CLAUDE.md 必须提到 minutes.sql(防再照过期清单重建库)
 grep -qE 'minutes\.sql|relationships,minutes' CLAUDE.md && ok "CLAUDE.md SQL 清单含 minutes(全写或花括号缩写)" || bad "CLAUDE.md SQL 运行清单过期(缺 minutes.sql;以 FEATURES §4.2 为准)"
 
 # 6a) father_id 退役列写入(硬项,v0.46 起):单一真源=relationships 的 father 边;任何 .js 出现 father_id: 赋值即 FAIL
 #     (v0.46 已清掉 db.js purge/merge 里仅剩的两处;tools-spouse 只清 spouse 不碰 father_id,故无白名单)
-HITS=$(grep -n 'father_id:' ./*.js 2>/dev/null | grep -v 'father_note\|//' || true)
+#     注:先把行内 // 注释尾巴切掉再判(awk -F'//' 取 $1),别用 grep -v '//' ——那会把任何带行尾注释的整行豁免
+HITS=$(grep -n 'father_id:' ./*.js 2>/dev/null | grep -v 'father_note' | awk -F'//' '$1 ~ /father_id:/' || true)
 [ -z "$HITS" ] && ok "无 father_id 退役列写入(单一真源=father 边)" || bad "father_id 已退役,禁止写(改走 relationships father 边):
 $HITS"
 
 # 6b) 其它退役列写入(软项):除已记档处(tools-spouse 清 spouse)外不应新增
-HITS=$(grep -n 'kind:\|mother:\|rank:\|relation_type:' ./*.js 2>/dev/null | grep -v '^./tools-spouse.js' | grep -v 'father_note\|//' || true)
+HITS=$(grep -n 'kind:\|mother:\|rank:\|relation_type:' ./*.js 2>/dev/null | grep -v '^./tools-spouse.js' | grep -v 'father_note' | awk -F'//' '$1 ~ /kind:|mother:|rank:|relation_type:/' || true)
 [ -z "$HITS" ] && ok "无新增其它退役列写入" || warn "疑似退役列写入(核对是否合规):
 $HITS"
 
@@ -52,6 +54,15 @@ $HITS"
 HITS=$(grep -rln 'SB_ANON *=' functions/api/*.js 2>/dev/null | grep -v '_shared.js' || true)
 [ -z "$HITS" ] && ok "CF 函数 Supabase 常量单份(_shared.js)" || bad "CF 函数仍有内联 SB 常量:
 $HITS"
+
+# 8) SQL 自登记(v0.48 起):每个 supabase/*.sql 末尾必须带自己的 schema_migrations 登记行
+#    (跑没跑过靠 probes/check-migrations.mjs 对线上核对;这里保证"仓库侧约定"不靠人记)
+MISS=""
+for f in supabase/*.sql; do
+  b=$(basename "$f" .sql)
+  grep -q 'schema_migrations(version)' "$f" && grep -q "'$b'" "$f" || MISS="$MISS $b"
+done
+[ -z "$MISS" ] && ok "SQL 全部含自登记行(迁移追踪)" || bad "这些 SQL 缺自登记行(文件末尾加 insert into public.schema_migrations(version) select '<基名>' where to_regclass('public.schema_migrations') is not null on conflict (version) do nothing;):$MISS"
 
 say ""
 if [ "$FAIL" = "0" ]; then say "=== ship-checks: ALL PASS ✓ ==="; else say "=== ship-checks: 有 FAIL,先修再发版 ==="; exit 1; fi
