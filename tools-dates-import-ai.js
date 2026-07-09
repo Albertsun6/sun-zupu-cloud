@@ -15,23 +15,21 @@ function normalizeDate(raw){
 }
 async function aiNormalizeDates(list){
   if(!list.length) return [];
-  const session=await window.SBAUTH.getSession(); const token=session&&session.access_token;
-  const r=await fetch("/api/normalize-dates",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({dates:list}) });
-  const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j.results||[];
+  const j=await window.CFN("/api/normalize-dates",{dates:list});   // 网络 I/O 收口 db.js:CFN 统一带 JWT(v0.49,B1-3)
+  return j.results||[];
 }
 // 第二个 AI(智谱 GLM)做同样的日期拆解,用于双重验证;未配置 GLM_API_KEY 时后端返回空 + note。
 // 不阻断导入,但把「第二模型未启用/失败」记进 _glmOff,由预览层显式提示,不再静默退化成单模型。
 let _glmOff=false;
 async function aiNormalizeDatesGLM(list){
   if(!list.length) return [];
-  const session=await window.SBAUTH.getSession(); const token=session&&session.access_token;
+  _glmOff=false;   // 每次真实调用前重置(模块级变量粘性:上次失败不该让这次没送 AI 的批次也顶着旧横幅)
   const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),28000);   // GLM 慢/挂不阻断导入
   try{
-    const r=await fetch("/api/normalize-dates-glm",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({dates:list}), signal:ctrl.signal });
-    const j=await r.json().catch(()=>({})); if(!r.ok){ _glmOff=true; return []; }
+    const j=await window.CFN("/api/normalize-dates-glm",{dates:list},{signal:ctrl.signal});
     _glmOff = !!(j.note && /未配置|未启用/.test(j.note));   // 后端明确回「未配置 GLM_API_KEY(第二验证未启用)」
     return j.results||[];
-  }catch(e){ _glmOff=true; return []; } finally{ clearTimeout(t); }
+  }catch(e){ _glmOff=true; return []; } finally{ clearTimeout(t); }   // 出错(含 HTTP 非 2xx、超时)→ 记 GLM 缺席,不阻断
 }
 // 双 AI 拆日期:DeepSeek + GLM 并行,逐条对齐;两者对 年/月/日/农历 判断不一致→标 _conflict 供人工核对
 async function aiNormalizeDatesDual(list){
@@ -226,9 +224,8 @@ function guessField(header){
 }
 // AI 推荐列映射(人工审核);走 CF 代理 DeepSeek,editor 鉴权,失败抛错由调用方提示
 async function aiMapColumns(headers, sample){
-  const session=await window.SBAUTH.getSession(); const token=session&&session.access_token;
-  const r=await fetch("/api/map-columns",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({ headers, sample, fields:IMPORT_FIELDS.map(f=>({k:f.k,label:f.label})) }) });
-  const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j.mapping||{};
+  const j=await window.CFN("/api/map-columns",{ headers, sample, fields:IMPORT_FIELDS.map(f=>({k:f.k,label:f.label})) });
+  return j.mapping||{};
 }
 let _imp=null;
 function parseDelimited(text,delim){
@@ -317,6 +314,7 @@ async function buildPreviewFromIncoming(incList){
     const raw = _DATESIG.test(b)?b:(_DATESIG.test(bl)?bl:b); if(!raw){ return; } inc._braw=raw;   // 日期可能在 birth 或 农历列
     if(needsAIDate(raw) || (parseDateParts(raw).is_lunar && parseDateParts(raw).year)) aiNeed.add(raw); });   // 农历/年号送双AI验证
   const mp={}; if(aiNeed.size){ try{ (await aiNormalizeDatesDual([...aiNeed])).forEach(r=>{ if(r&&r.input) mp[r.input]=r; }); }catch(e){} }
+  _imp.aiNeedCount=aiNeed.size; _imp.aiFailed = aiNeed.size>0 && !Object.keys(mp).length;   // 送了 AI 却零结果=AI 不可用,预览显式提示(不再与"无需 AI"零区别;归因见 cleanDraftsDates 同注释)
   const messy = s => !(s||"").trim() || /\d{4}|时|分/.test(s);   // 空 或 含年/时=未拆原串,可被万年历清洗版覆盖
   list.forEach(inc=>{ if(!inc._braw) return; const raw=inc._braw; const rd=resolveDate(mp[raw], raw);
     if(rd.birth) inc.birth=rd.birth; else inc.birth=raw;                             // 公历(认不出保留原文)
@@ -348,6 +346,7 @@ function renderImportPreview(){
   const skipCount=P.filter(x=>x.target==="__skip__").length;
   mask.innerHTML=`<div class="modal" style="width:min(840px,100%)"><h2>匹配预览(${P.length} 行 · 新建 ${newCount}${skipCount?(" · 忽略 "+skipCount):""}${_imp.skippedNoName?(" · 空名跳过 "+_imp.skippedNoName):""})</h2>
     <p class="hint">左=导入数据,中=匹配到谁(可改/新建/<b>忽略不导入</b>),右=命中现有时怎么处理。<b>合并·填空</b>只补空字段(不动已有);<b>覆盖</b>用导入值覆盖;<b>跳过</b>不动。</p>
+    ${_imp.aiFailed?`<p class="hint" style="color:#b91c1c">⚠ AI 日期识别本次没有可用结果(主模型失败或全部无法识别)——<b>缺年份的日期(年号/民国年等)按原文保留</b>;完整的农历日期不受影响,已由万年历本地换算。导入后可到「数据体检→规范出生日期」再清洗。</p>`:((_glmOff&&_imp.aiNeedCount)?'<p class="hint" style="color:#b45309">⚠ 第二模型(智谱 GLM)本次未参与(未配置或超时/失败)——日期仅 DeepSeek 单模型识别,无交叉校验,请多核对。</p>':'')}
     <div style="margin:.3rem 0">命中现有的全部设为: <button class="btn btn-sm" data-all="merge">合并</button> <button class="btn btn-sm" data-all="overwrite">覆盖</button> <button class="btn btn-sm" data-all="skip">跳过</button> <button class="btn btn-sm" data-skipwarn="1" title="把生年不一致/多同名的行全部设为忽略">🚫 忽略全部有警告的</button></div>
     <div style="max-height:50vh;overflow:auto"><table class="roster"><thead><tr><th>导入数据</th><th>匹配到</th><th>处理</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="err" id="impErr"></div>
@@ -416,7 +415,8 @@ async function cleanDraftsDates(drafts){
     d._dateWarn = dateConflictNote(raw, mp[raw]);   // DeepSeek 与 GLM 判断不一致→提示
   });
   const vals=Object.values(mp);
-  return { ai:vals.length, dual:vals.filter(r=>r&&r._glm).length, conflicts:vals.filter(r=>r&&r._conflict).length };   // 供 UI 显示"双验证 N 条"
+  return { ai:vals.length, dual:vals.filter(r=>r&&r._glm).length, conflicts:vals.filter(r=>r&&r._conflict).length,
+           need:need.size, failed:need.size>0 && !vals.length };   // failed=送了 AI 却没有可用结果(注意:Dual 以主模型 DeepSeek 为骨架,主模型挂则 GLM 结果也进不来——文案别指认"两模型都挂";完整农历日期不受影响,resolveDate 会本地换算)
 }
 function openAI(){ $("#aiText").value=""; $("#aiMsg").textContent=""; $("#aiDrafts").innerHTML=""; $("#aiCreateBar").style.display="none"; _aiDrafts=[]; $("#aiMask").classList.add("open"); }
 async function aiParse(){
@@ -424,14 +424,12 @@ async function aiParse(){
   if(!text){ msg.textContent="请先粘贴文字"; return; }
   msg.textContent="识别中…(首次可能十几秒)"; $("#aiParse").disabled=true;
   try{
-    const session=await window.SBAUTH.getSession(); const token=session&&session.access_token;
-    const r=await fetch("/api/ai-parse",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({text}) });
-    const data=await r.json().catch(()=>({error:"返回非JSON(可能AI代理未部署)"}));
-    if(!r.ok){ msg.textContent="失败:"+(data.error||r.status); return; }
+    const data=await window.CFN("/api/ai-parse",{text});   // 网络 I/O 收口 db.js(v0.49);失败抛错由下方 catch 提示
     _aiDrafts=(data.persons||[]).map(p=>{ const d={}; AI_DRAFT_FIELDS.forEach(f=>d[f.k]=p[f.k]!=null?String(p[f.k]):""); if(!d.father_note&&p.father) d.father_note="父:"+p.father; return d; });
     msg.textContent=`识别到 ${_aiDrafts.length} 人,正用万年历换算日期/时辰…`;
     const st=await cleanDraftsDates(_aiDrafts);   // 当场拆 公历/农历(属相)/时辰,所见即所得(不必等创建)
-    const dualNote = st&&st.dual ? `,DeepSeek+GLM 双验证 ${st.dual} 条日期${st.conflicts?(`,${st.conflicts} 条两模型不一致已标红`):`(均一致)`}` : (st&&st.ai?`(GLM 未参与——检查 GLM_API_KEY)`:``);
+    const dualNote = st&&st.failed ? `;⚠ AI 识别没有可用结果(主模型失败或全部无法识别)——缺年份的日期按原文保留,完整农历日期已由万年历本地换算`
+      : (st&&st.dual ? `,DeepSeek+GLM 双验证 ${st.dual} 条日期${st.conflicts?(`,${st.conflicts} 条两模型不一致已标红`):`(均一致)`}` : (st&&st.ai&&_glmOff?`(GLM 本次未参与:未配置或超时/失败)`:``));
     msg.textContent=`识别到 ${_aiDrafts.length} 人,日期已按万年历换算${dualNote},请核对补齐后创建`;
     renderAIDrafts();
   }catch(e){ msg.textContent="网络/服务错误:"+e.message; }
@@ -465,14 +463,14 @@ async function aiCreateAll(){
   if(!confirm("将创建 "+valid.length+" 个人物(状态=待考)"+(skipped?(",跳过 "+skipped+" 条疑似重复"):"")+"?")) return;
   const btn=$("#aiCreateAll"); btn.disabled=true; btn.textContent="识别日期+创建中…";
   await cleanDraftsDates(valid);   // 兜底再拆一次(识别时已拆;用户若手改了出生串这里纠正),幂等
-  let ok=0, fail=0;
-  for(const d of valid){ try{ await api("POST","/api/persons",{ ...d, status:"待考" }); ok++; }catch(e){ fail++; } }
+  let ok=0, fail=0, spOk=0;
+  for(const d of valid){ try{ await api("POST","/api/persons",{ ...d, status:"待考" }); ok++; if((d.spouse||"").trim()) spOk++; }catch(e){ fail++; } }   // spOk 只数创建成功的(失败的进不了⑧整理器)
   btn.textContent="全部新建为人物";
   btn.disabled=false;
   await reloadPersons(); renderPeople(); renderHeader();
-  $("#aiMsg").textContent=`已创建 ${ok} 人${fail?(",失败 "+fail):""}`;
+  $("#aiMsg").textContent=`已创建 ${ok} 人${fail?(",失败 "+fail):""}`+(spOk?`;其中 ${spOk} 人带配偶原文——到「数据体检 → ⑧配偶待整理」可一键转成配偶人物+夫妻关系`:"");
   _aiDrafts=[]; renderAIDrafts();
-  if(!fail) setTimeout(()=>$("#aiMask").classList.remove("open"), 1200);
+  if(!fail && !spOk) setTimeout(()=>$("#aiMask").classList.remove("open"), 1200);   // 有配偶引导时不自动关,让人看完提示
 }
 // AI 草稿走 reconcile:按 姓名+生年 匹配现有 → 逐条 合并/覆盖/跳过/新建(复用表格导入预览)
 async function aiReconcile(){
