@@ -115,7 +115,7 @@ async function restorePerson(pid){
 }
 async function purgePerson(pid){
   const before = await getPerson(pid); if(!before) return { ok:true };
-  must(await sb.from("persons").update({ father_id:"" }).eq("father_id",pid));   // 子女断父链
+  // 子女父链 = relationships 的 father 边;删 person 行时 from_id/to_id 均 on delete cascade 会自动清掉相关边,无需(也不再)写退役列 father_id。
   const media = must(await sb.from("media").select("path").eq("person_id",pid));
   const keys = media.map(m=>m.path).filter(Boolean);
   if(keys.length){ try{ await sb.storage.from(BUCKET).remove(keys); }catch(e){} }
@@ -215,7 +215,10 @@ async function listTranscription(){ return must(await sb.from("transcription").s
 async function listHistory(){ return must(await sb.from("history").select("*").order("id",{ascending:false}).limit(300)); }
 
 // ---------- 撤销 ----------
+// 可撤销操作的唯一真源:撤销能力由后端(delRelationship 等已存 before + undo 分支)决定,这是权威清单。
+// 前端 app.js 的操作历史 UI 直接读 window.UNDOABLE,不再自持第二份 Set(防两份漂移致「后端能撤但按钮不显示」)。
 const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media","create:relationship","delete:relationship"]);
+window.UNDOABLE = UNDOABLE;
 async function undo(hid){
   const h = must(await sb.from("history").select("*").eq("id",hid).maybeSingle());
   if(!h) throw new Error("记录不存在");
@@ -286,15 +289,13 @@ async function mergePersons(survivorId, dupId){
   const sur=await getPerson(survivorId), dup=await getPerson(dupId);
   if(!sur||!dup) throw new Error("人物不存在");
   const c={children:0,relations:0,marriages:0,media:0};
-  // 1) 子女改父
-  const kids=must(await sb.from("persons").select("id").eq("father_id",dupId)); c.children=kids.length;
-  if(kids.length) must(await sb.from("persons").update({father_id:survivorId}).eq("father_id",dupId));
-  // 2) 关系迁移(处理自环/撞重复/对称规范序)
+  // 1) 关系迁移(处理自环/撞重复/对称规范序);父子链=father 边(from=父/to=子),顺带按边数子女(取代已退役的 father_id 列统计——列已停写,按列统计会漏掉退役后新建的父子)
   const rels=must(await sb.from("relationships").select("*").or("from_id.eq."+dupId+",to_id.eq."+dupId));
   const existing=must(await sb.from("relationships").select("from_id,to_id,type").or("from_id.eq."+survivorId+",to_id.eq."+survivorId));
   const keyOf=(f,t,ty)=>f+"|"+t+"|"+ty;
   const surSet=new Set(existing.map(r=>keyOf(r.from_id,r.to_id,r.type)));
   for(const r of rels){
+    if(r.type==="father" && r.from_id===dupId) c.children++;   // dup 作父的 father 边 → 其名下子女数
     let f=r.from_id===dupId?survivorId:r.from_id, t=r.to_id===dupId?survivorId:r.to_id;
     if(f===t){ must(await sb.from("relationships").delete().eq("id",r.id)); continue; }      // 自环
     if(!r.directed && f>t){ const x=f; f=t; t=x; }                                            // 对称规范序
@@ -302,19 +303,19 @@ async function mergePersons(survivorId, dupId){
     must(await sb.from("relationships").update({from_id:f,to_id:t}).eq("id",r.id));
     surSet.add(keyOf(f,t,r.type)); c.relations++;
   }
-  // 3) 婚姻
+  // 2) 婚姻
   const marr=must(await sb.from("marriages").select("id").eq("person_id",dupId)); c.marriages=marr.length;
   if(marr.length) must(await sb.from("marriages").update({person_id:survivorId}).eq("person_id",dupId));
-  // 4) 照片
+  // 3) 照片
   const med=must(await sb.from("media").select("id").eq("person_id",dupId)); c.media=med.length;
   if(med.length){ must(await sb.from("media").update({person_id:survivorId}).eq("person_id",dupId)); await refreshPrimary(survivorId); }
-  // 5) survivor 补空(不覆盖已填)
+  // 4) survivor 补空(不覆盖已填)
   const patch={};
   EDITABLE.forEach(k=>{ if((!sur[k]||(""+sur[k]).trim()==="") && dup[k] && (""+dup[k]).trim()!=="") patch[k]=dup[k]; });
   if(Object.keys(patch).length){ patch.updated_at=nowStr(); must(await sb.from("persons").update(patch).eq("id",survivorId)); }
-  // 6) dup 进回收站(此时已无引用)
+  // 5) dup 进回收站(此时已无引用)
   must(await sb.from("persons").update({ deleted:1, deleted_at:nowStr() }).eq("id",dupId));
-  // 7) 留痕(history 原 entity_id 不动,保留各自审计)
+  // 6) 留痕(history 原 entity_id 不动,保留各自审计)
   await logHist("merge","person",survivorId,"合并: "+(dup.name||dupId)+"("+dupId+")→"+(sur.name||survivorId)+"("+survivorId+");迁移 子女"+c.children+"/关系"+c.relations+"/婚姻"+c.marriages+"/照片"+c.media, dup, null);
   return { ok:true, ...c };
 }

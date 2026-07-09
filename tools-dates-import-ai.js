@@ -19,16 +19,19 @@ async function aiNormalizeDates(list){
   const r=await fetch("/api/normalize-dates",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({dates:list}) });
   const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j.results||[];
 }
-// 第二个 AI(智谱 GLM)做同样的日期拆解,用于双重验证;未配置 GLM_API_KEY 时后端返回空,这里安静降级
+// 第二个 AI(智谱 GLM)做同样的日期拆解,用于双重验证;未配置 GLM_API_KEY 时后端返回空 + note。
+// 不阻断导入,但把「第二模型未启用/失败」记进 _glmOff,由预览层显式提示,不再静默退化成单模型。
+let _glmOff=false;
 async function aiNormalizeDatesGLM(list){
   if(!list.length) return [];
   const session=await window.SBAUTH.getSession(); const token=session&&session.access_token;
   const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),28000);   // GLM 慢/挂不阻断导入
   try{
     const r=await fetch("/api/normalize-dates-glm",{ method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer "+(token||"") }, body:JSON.stringify({dates:list}), signal:ctrl.signal });
-    const j=await r.json().catch(()=>({})); if(!r.ok) return [];
+    const j=await r.json().catch(()=>({})); if(!r.ok){ _glmOff=true; return []; }
+    _glmOff = !!(j.note && /未配置|未启用/.test(j.note));   // 后端明确回「未配置 GLM_API_KEY(第二验证未启用)」
     return j.results||[];
-  }catch(e){ return []; } finally{ clearTimeout(t); }
+  }catch(e){ _glmOff=true; return []; } finally{ clearTimeout(t); }
 }
 // 双 AI 拆日期:DeepSeek + GLM 并行,逐条对齐;两者对 年/月/日/农历 判断不一致→标 _conflict 供人工核对
 async function aiNormalizeDatesDual(list){
@@ -187,6 +190,7 @@ async function openDateNormalizer(){
   mask.innerHTML=`<div class="modal" style="width:min(700px,100%)">
     <h2>规范出生日期 <span class="pill pill-info">${good.length}</span></h2>
     <p class="hint">拆成 公历日期 / 农历生辰(含属相) / 时辰(用万年历换算);<b>解析不出/约X/无考 等不规则的</b>:原文并进备注、状态标存疑。逐条核对,取消勾选不对的,确认后改(可撤销)。</p>
+    ${_glmOff?'<p class="hint" style="color:#b45309">⚠ 第二模型(智谱 GLM)未启用——本次仅 DeepSeek 单模型识别,无双模型交叉校验,请对结果多加核对。</p>':''}
     <div style="max-height:52vh;overflow:auto">${list||'<div class="hint">没有需要规范的(都已是标准格式)。</div>'}${badList}</div>
     <div class="modal-foot">${good.length?`<label class="hint"><input type="checkbox" id="dnAll" checked> 全选</label>`:""}<span class="spacer"></span><button class="btn" id="dnCancel">关闭</button>${good.length?`<button class="btn btn-primary" id="dnOk">应用所选</button>`:""}</div>
   </div>`;

@@ -35,8 +35,8 @@ function _renderLightbox(){
 }
 // 软件版本(每次部署递增;显示在页头与登录页,便于确认浏览器已加载最新版)
 const APP_NAME = "关系图谱";              // 产品名(品牌,固定);本质=人物关系图谱,非单一族谱;某本谱名是 meta.title(数据)
-const APP_VERSION = "v0.45.0";
-const APP_DATE = "2026-07-01";
+const APP_VERSION = "v0.46.0";
+const APP_DATE = "2026-07-09";
 [["#appVer",APP_VERSION],["#appVerLogin","版本 "+APP_VERSION+" · "+APP_DATE]].forEach(([s,t])=>{ const e=document.querySelector(s); if(e) e.textContent=t; });
 
 // L1 节点=纯个人属性。世代(派生)/本族外部/行第/亲属关系/母/父系说明/配偶 已退出表单(关系→边层,世代→推算)。
@@ -45,7 +45,7 @@ const FORM_KEYS = ["id","name","char_gen","alias","sex","birth",
   "occupation","company","residence","contact","address","deeds","source","status","note"];
 const DIRECT_LINE = new Set(["S001","S002","S004","S008","S010","S014","S019","S033","S046"]);
 const ORIG_IMG = {p1:window.photoUrl("yuanpu/p1.jpg"),p2:window.photoUrl("yuanpu/p2.jpg"),p3:window.photoUrl("yuanpu/p3.jpg"),p4:window.photoUrl("yuanpu/p4.jpg")};
-const UNDOABLE = new Set(["create:person","update:person","delete:person","purge:person","delete:marriage","delete:media","create:relationship"]);
+const UNDOABLE = window.UNDOABLE;   // 单一真源:db.js 定义并挂 window(先于 app.js 加载);不再自持第二份,防「后端能撤但前端不显示撤销按钮」的漂移
 
 const state = { persons:[], meta:{}, narratives:[], verify:[], transcription:[], relTypes:[], relCount:{}, q:"", share:false,
                 editing:null, user:null, canEdit:false, isAdmin:false, canMinutes:false, lineage:"",
@@ -405,7 +405,7 @@ async function renderTrash(){
     const foot=el("div","modal-foot");
     const rb=el("button","btn btn-primary btn-sm","恢复"); const pb=el("button","btn btn-danger btn-sm","彻底删除");
     rb.onclick=async()=>{await api("POST","/api/persons/"+encodeURIComponent(p.id)+"/restore");await reloadPersons();renderTrash();renderPeople();renderHeader();};
-    pb.onclick=async()=>{if(!confirm("彻底删除「"+(p.name||p.id)+"」?(操作历史里仍可撤销重建)"))return;await api("DELETE","/api/persons/"+encodeURIComponent(p.id)+"/purge");renderTrash();};
+    pb.onclick=async()=>{if(!confirm("彻底删除「"+(p.name||p.id)+"」?\n可在操作历史撤销以重建【人物基本信息】;但该人的照片、婚姻、关系边不会一起恢复。"))return;await api("DELETE","/api/persons/"+encodeURIComponent(p.id)+"/purge");renderTrash();};
     foot.appendChild(el("span","spacer")); if(state.canEdit){ foot.appendChild(rb); foot.appendChild(pb); } else foot.appendChild(el("span","hint","(只读)"));
     r.appendChild(foot); box.appendChild(r);
   });
@@ -707,7 +707,7 @@ async function openDetail(p){
     const cc=box.querySelector(".dphoto-count"); if(cc) cc.onclick=open; }
   { const eb=$("#relEgoBtn"); if(eb) eb.onclick=()=>{ state.graphCenter=p.id; state.pathA=""; state.pathB=""; closeDetail(); switchView("graph"); }; }
   { const sb=$("#spConvDetail"); if(sb) sb.onclick=()=>{ closeDetail(); window.openSpouseConverter&&window.openSpouseConverter(p.id); }; }
-  box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?(直接删除,不可恢复;人物本身不受影响)"))return; try{ await window.REL.del(+b.dataset.rid); await reloadPersons(); await refreshRelCount(); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
+  box.querySelectorAll(".reldel").forEach(b=>b.onclick=async()=>{ if(!confirm("删除这条关系?(可在操作历史里撤销;人物本身不受影响)"))return; try{ await window.REL.del(+b.dataset.rid); await reloadPersons(); await refreshRelCount(); openDetail(byId(p.id)); }catch(e){ alert("删除失败:"+e.message); } });
   box.querySelectorAll(".relnote").forEach(b=>b.onclick=async()=>{ const rid=+b.dataset.rid, r=rels.find(x=>String(x.id)===b.dataset.rid)||{};
     if(b.dataset.spouse==="1"){   // 配偶:同时改名分(原配/续娶/侧室)+婚配年,以记录先后
       const nv=prompt("名分(原配/续娶/侧室,可空):", r.note||""); if(nv===null)return;

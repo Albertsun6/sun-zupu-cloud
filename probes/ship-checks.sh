@@ -37,9 +37,15 @@ NALL=$(grep -c '\.js?v=' index.html || true)
 # 5) SQL 运行顺序文档一致:CLAUDE.md 必须提到 minutes.sql(防再照过期清单重建库)
 grep -qE 'minutes\.sql|relationships,minutes' CLAUDE.md && ok "CLAUDE.md SQL 清单含 minutes(全写或花括号缩写)" || bad "CLAUDE.md SQL 运行清单过期(缺 minutes.sql;以 FEATURES §4.2 为准)"
 
-# 6) 退役列写入(软项):除已记档的 3 处(db.js 合并/彻删迁移 father_id、tools-spouse 清 spouse)外不应新增
-HITS=$(grep -n 'father_id:\|kind:\|mother:\|rank:\|relation_type:' ./*.js 2>/dev/null | grep -v '^./db.js' | grep -v '^./tools-spouse.js' | grep -v 'father_note\|//' || true)
-[ -z "$HITS" ] && ok "无新增退役列写入" || warn "疑似退役列写入(核对是否合规):
+# 6a) father_id 退役列写入(硬项,v0.46 起):单一真源=relationships 的 father 边;任何 .js 出现 father_id: 赋值即 FAIL
+#     (v0.46 已清掉 db.js purge/merge 里仅剩的两处;tools-spouse 只清 spouse 不碰 father_id,故无白名单)
+HITS=$(grep -n 'father_id:' ./*.js 2>/dev/null | grep -v 'father_note\|//' || true)
+[ -z "$HITS" ] && ok "无 father_id 退役列写入(单一真源=father 边)" || bad "father_id 已退役,禁止写(改走 relationships father 边):
+$HITS"
+
+# 6b) 其它退役列写入(软项):除已记档处(tools-spouse 清 spouse)外不应新增
+HITS=$(grep -n 'kind:\|mother:\|rank:\|relation_type:' ./*.js 2>/dev/null | grep -v '^./tools-spouse.js' | grep -v 'father_note\|//' || true)
+[ -z "$HITS" ] && ok "无新增其它退役列写入" || warn "疑似退役列写入(核对是否合规):
 $HITS"
 
 # 7) CF 函数 SB 常量单份(只在 _shared.js;config.js 是前端那份)
