@@ -15,7 +15,7 @@ const SYSTEM = `你是表格列映射助手。用户给你:headers(一组表头�
 
 export async function onRequestPost({ request, env }){
   try{
-    const gate = await requireWrite(request); if(gate.resp) return gate.resp;   // _shared 统一门禁(含 aud 校验)
+    const gate = await requireWrite(request, env); if(gate.resp) return gate.resp;   // _shared 统一门禁(含 aud 校验)
 
     const body = await request.json().catch(()=>({}));
     const headers = Array.isArray(body.headers) ? body.headers.map(x=>String(x==null?"":x)) : [];

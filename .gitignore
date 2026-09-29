@@ -1,6 +1,8 @@
 # 绝不提交:密钥、数据、备份
 .env
 .env.*
+/config.js
+backup-worker/.dev.vars
 *service_role*
 *.db
 *.sqlite

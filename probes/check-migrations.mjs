@@ -1,15 +1,32 @@
 // probes/check-migrations.mjs —— 核对"线上库跑过哪些 SQL"vs 仓库里有哪些 SQL(防漏跑迁移)。
-// 只用 config.js 里的公开 anon key 读 schema_migrations(版本串非敏感),无需登录凭证 → 可本地/CI 跑。
-// 用法:node probes/check-migrations.mjs
-import { readFileSync, readdirSync } from "node:fs";
+// 凭证只从环境变量(或本地 gitignore 的 config.js)读,仓库里不再写 url/anon。
+// 用法:SUPABASE_URL=... SUPABASE_ANON_KEY=... node probes/check-migrations.mjs
+//      或本地已有 config.js 时直接 node probes/check-migrations.mjs
+// CI / fork PR 未配变量时优雅跳过(exit 0),不把检查弄红。
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const cfg = readFileSync(join(ROOT, "config.js"), "utf8");
-const SB_URL = (cfg.match(/url:\s*"([^"]+)"/) || [])[1];
-const SB_ANON = (cfg.match(/anon:\s*"([^"]+)"/) || [])[1];
-if (!SB_URL || !SB_ANON) { console.error("读不到 config.js 的 url/anon"); process.exit(2); }
+
+function loadSb() {
+  let url = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+  let anon = String(process.env.SUPABASE_ANON_KEY || "");
+  if (url && anon) return { url, anon };
+  const cfgPath = join(ROOT, "config.js");
+  if (!existsSync(cfgPath)) return { url: "", anon: "" };
+  const cfg = readFileSync(cfgPath, "utf8");
+  url = (cfg.match(/url:\s*"([^"]+)"/) || [])[1] || "";
+  anon = (cfg.match(/anon:\s*"([^"]+)"/) || [])[1] || "";
+  if (!url || !anon || url.includes("YOUR_PROJECT") || anon.includes("YOUR_SUPABASE")) return { url: "", anon: "" };
+  return { url, anon };
+}
+
+const { url: SB_URL, anon: SB_ANON } = loadSb();
+if (!SB_URL || !SB_ANON) {
+  console.log("跳过 check-migrations:未设置 SUPABASE_URL / SUPABASE_ANON_KEY(fork PR 或未配 secret/本地 config.js)。");
+  process.exit(0);
+}
 
 // 仓库里应有的迁移 = supabase/*.sql 的基名
 const files = readdirSync(join(ROOT, "supabase")).filter(f => f.endsWith(".sql")).map(f => f.replace(/\.sql$/, "")).sort();

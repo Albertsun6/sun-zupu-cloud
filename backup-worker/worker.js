@@ -6,7 +6,11 @@
 //  - /run 需 BACKUP_TOKEN(未配 → 一律 403,fail-closed)。R2 桶必须是私有(默认即私有)。
 // 部署:见同目录 README.md(CF 后台建 R2 桶 + 建 Worker + 绑定 + 加 secret + cron;或 wrangler)。
 
-const SB_URL = "https://ktalsyrxueabdisrszde.supabase.co";
+function sbUrl(env) {
+  const u = String((env && env.SUPABASE_URL) || "").replace(/\/+$/, "");
+  if (!u) throw new Error("未配置 SUPABASE_URL");
+  return u;
+}
 // 传家核心数据表(录音音频不备,在 Supabase 私有桶另有平台备份;见决策)。值=主键列,分页必须按它排序。
 const TABLES = {
   persons: "id", relationships: "id", relationship_types: "type", marriages: "id",
@@ -14,11 +18,11 @@ const TABLES = {
   history: "id", minutes: "id", minute_segments: "id",
 };
 
-async function fetchAll(sr, table, pk) {
+async function fetchAll(sr, base, table, pk) {
   const out = [], page = 1000; let offset = 0;
   for (;;) {
     // order=<主键> 必带:无 ORDER BY 的 limit/offset 跨请求行序不稳,>1000 行的表(history)会静默丢/重行
-    const r = await fetch(`${SB_URL}/rest/v1/${table}?select=*&order=${pk}.asc&limit=${page}&offset=${offset}`,
+    const r = await fetch(`${base}/rest/v1/${table}?select=*&order=${pk}.asc&limit=${page}&offset=${offset}`,
       { headers: { apikey: sr, authorization: "Bearer " + sr } });
     if (!r.ok) throw new Error(`${table} -> ${r.status}`);
     const rows = await r.json();
@@ -33,9 +37,10 @@ async function doBackup(env) {
   const sr = env.SUPABASE_SERVICE_ROLE;
   if (!sr) throw new Error("未配置 SUPABASE_SERVICE_ROLE");
   if (!env.BACKUP_BUCKET) throw new Error("未绑定 R2 桶 BACKUP_BUCKET");
+  const base = sbUrl(env);
   const at = new Date().toISOString();
   const data = { _meta: { app: "zupu-cloud", at } }, counts = {};
-  for (const [t, pk] of Object.entries(TABLES)) { const rows = await fetchAll(sr, t, pk); data[t] = rows; counts[t] = rows.length; }
+  for (const [t, pk] of Object.entries(TABLES)) { const rows = await fetchAll(sr, base, t, pk); data[t] = rows; counts[t] = rows.length; }
   // 哨兵:persons 0 行 = key 贴错(anon key 会被 RLS 滤成空结果而非报错)或库空——拒绝写"成功"的空备份
   if (!counts.persons) throw new Error("persons 0 行,拒绝写空备份——检查 SUPABASE_SERVICE_ROLE 是否贴成了 anon key");
   const json = JSON.stringify(data);

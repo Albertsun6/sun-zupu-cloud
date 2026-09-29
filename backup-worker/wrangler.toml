@@ -1,6 +1,6 @@
 # zupu-backup —— 独立 Worker(每日 cron 把全量数据 JSON 备份到 R2)。
 # 用 wrangler 部署:先 `npx wrangler r2 bucket create zupu-backups`,再在本目录 `npx wrangler deploy`,
-# 然后 `npx wrangler secret put SUPABASE_SERVICE_ROLE` 和 `npx wrangler secret put BACKUP_TOKEN`。
+# 然后 `npx wrangler secret put SUPABASE_URL`、`SUPABASE_SERVICE_ROLE`、`BACKUP_TOKEN`。
 # 不想用 CLI 就走 CF 后台(见 README.md)。
 name = "zupu-backup"
 main = "worker.js"
@@ -15,4 +15,4 @@ crons = ["0 19 * * *"]
 binding = "BACKUP_BUCKET"
 bucket_name = "zupu-backups"
 
-# SUPABASE_SERVICE_ROLE、BACKUP_TOKEN 为 secret,不写这里,用 `wrangler secret put` 或后台加。
+# SUPABASE_URL、SUPABASE_SERVICE_ROLE、BACKUP_TOKEN 为 secret,不写真实值,用 `wrangler secret put` 或后台加。

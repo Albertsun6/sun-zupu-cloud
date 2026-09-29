@@ -10,7 +10,7 @@
 | **最近更新** | 2026-07-09 |
 | **技术栈** | 纯静态 vanilla JS（无构建、纯 ESM + CDN）+ Cloudflare Pages + Supabase(Postgres/Auth/Storage) + CF Pages Functions(代理 AI / 录音转写 / 用户管理) |
 | **前端文件** | `app.js`(核心:state/helpers/render*/CRUD/详情/编辑/boot+权限门禁,~1300行)、`tools-dates-import-ai.js`(日期规范化+表格导入+AI批量)、`tools-spouse.js`(配偶 blob 转边)、`tree-classic.js`(传统谱图挂图渲染)、`minutes.js`(纪要:录音/转写/AI整理,v0.41;v0.42 分段长录音+崩溃恢复)、`users.js`(用户管理,admin,v0.41)、`db.js`(数据层)、`calendar.js`(万年历)。**模块加载顺序**:db→app→calendar→tools-*→tree-classic→minutes→users(均在 app 之后,app 末尾把核心符号挂 window 供其裸引用)。改版本必须同步改 `index.html` 全部 `?v=`。 |
-| **线上** | https://sun-zupu-cloud.pages.dev ｜ Supabase ref `ktalsyrxueabdisrszde`(新加坡) |
+| **线上** | https://sun-zupu-cloud.pages.dev |
 | **维护说明** | 本规格描述"系统能做什么"(功能/数据契约/安全模型)；操作手册见各项目 USAGE 约定；backlog 见 `../待做功能清单.md`。 |
 
 ---

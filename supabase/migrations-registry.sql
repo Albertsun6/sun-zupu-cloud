@@ -15,7 +15,7 @@ alter table public.schema_migrations enable row level security;
 drop policy if exists "mig read" on public.schema_migrations;
 create policy "mig read" on public.schema_migrations for select to anon, authenticated using (true);
 
--- 追溯登记:下列文件在现网库(ktalsyrxueabdisrszde)确实都跑过,补记事实。
+-- 追溯登记:下列文件在现网库确实都跑过,补记事实。
 -- 重建新库时本段也无害——重建流程本来就是按序跑完全部文件,登记与事实最终一致;
 -- 但若只跑了本文件就中途停手,登记会先于事实,check-migrations 此时的"全绿"不可信。
 insert into public.schema_migrations(version) values

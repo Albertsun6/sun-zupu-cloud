@@ -21,7 +21,7 @@ results 顺序与输入一致、长度一致。`;
 
 export async function onRequestPost({ request, env }){
   try{
-    const gate = await requireWrite(request); if(gate.resp) return gate.resp;   // _shared 统一门禁(含 aud 校验)
+    const gate = await requireWrite(request, env); if(gate.resp) return gate.resp;   // _shared 统一门禁(含 aud 校验)
 
     const body = await request.json().catch(()=>({}));
     const dates = Array.isArray(body.dates) ? body.dates.map(x=>String(x||"").trim()).filter(Boolean) : [];
