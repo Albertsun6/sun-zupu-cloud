@@ -9,24 +9,29 @@
 // 配置:CF Pages env:SUPABASE_SERVICE_ROLE、DASHSCOPE_API_KEY、DASHSCOPE_BASE(按 key 归属区:
 //      境内 https://dashscope.aliyuncs.com / 国际 https://dashscope-intl.aliyuncs.com)、DEEPSEEK_API_KEY(已配)。
 
-import { SB_URL, SB_ANON, json, extractJson, requireMinutes } from "./_shared.js";   // 门禁/常量统一走 _shared(原本函数的 requireMinutes 即其蓝本)
+import { sbCreds, json, extractJson, requireMinutes } from "./_shared.js";   // 门禁/常量统一走 _shared(原本函数的 requireMinutes 即其蓝本)
 
-const REST = SB_URL + "/rest/v1";
-const STORAGE = SB_URL + "/storage/v1";
 const BUCKET = "recordings";
 const EXT_OK = new Set(["mp3", "mp4", "m4a", "aac", "wav", "flac", "ogg", "opus", "amr", "wma", "webm"]);
 
+function sbApi(env) {
+  const { url, anon } = sbCreds(env);
+  return { url, anon, REST: url + "/rest/v1", STORAGE: url + "/storage/v1" };
+}
+
 // PostgREST(用调用者 JWT,RLS 生效)
-async function rest(method, token, pathQuery, body, prefer) {
-  const r = await fetch(REST + pathQuery, { method, headers: { apikey: SB_ANON, authorization: "Bearer " + token, "content-type": "application/json", ...(prefer ? { Prefer: prefer } : {}) }, body: body ? JSON.stringify(body) : undefined });
+async function rest(env, method, token, pathQuery, body, prefer) {
+  const { REST, anon } = sbApi(env);
+  const r = await fetch(REST + pathQuery, { method, headers: { apikey: anon, authorization: "Bearer " + token, "content-type": "application/json", ...(prefer ? { Prefer: prefer } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const txt = await r.text(); let data = null; try { data = txt ? JSON.parse(txt) : null; } catch (e) {}
   if (!r.ok) { const e = new Error("REST_" + r.status); e.status = r.status; e.detail = txt.slice(0, 150); throw e; }
   return data;
 }
-async function getMinute(token, id) { const rows = await rest("GET", token, "/minutes?id=eq." + id + "&select=*"); return Array.isArray(rows) ? rows[0] : null; }
+async function getMinute(env, token, id) { const rows = await rest(env, "GET", token, "/minutes?id=eq." + id + "&select=*"); return Array.isArray(rows) ? rows[0] : null; }
 // 受控写:用 service_role 写 minutes 的状态机/转写/音频/审计列(DB 触发器禁止普通 JWT 改这些列,故必须经此)。
 // 调用者已先过 requireMinutes,授权已校验;service_role 仅用于"受控字段"的服务端原子更新,不放权给客户端。
 async function restSvc(method, env, pathQuery, body, prefer) {
+  const { REST } = sbApi(env);
   const k = env.SUPABASE_SERVICE_ROLE;
   const r = await fetch(REST + pathQuery, { method, headers: { apikey: k, authorization: "Bearer " + k, "content-type": "application/json", ...(prefer ? { Prefer: prefer } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const txt = await r.text(); let data = null; try { data = txt ? JSON.parse(txt) : null; } catch (e) {}
@@ -37,12 +42,14 @@ async function restSvc(method, env, pathQuery, body, prefer) {
 // Storage 签名URL(service_role,绕开 storage RLS)
 function svcHeaders(env) { const k = env.SUPABASE_SERVICE_ROLE; return { apikey: k, authorization: "Bearer " + k, "content-type": "application/json" }; }
 async function signedDownload(env, path, expiresIn) {
+  const { STORAGE } = sbApi(env);
   const r = await fetch(STORAGE + "/object/sign/" + BUCKET + "/" + path, { method: "POST", headers: svcHeaders(env), body: JSON.stringify({ expiresIn }) });
   if (!r.ok) { const e = new Error("SIGN"); e.status = 502; throw e; }
   const d = await r.json(); return STORAGE + d.signedURL;   // signedURL 形如 /object/sign/recordings/<path>?token=...
 }
 async function signedUpload(env, path) {
   // 必带 body(哪怕空 {}):content-type=application/json 却无 body 时,storage 解析空体会 400(→502)。
+  const { STORAGE } = sbApi(env);
   const r = await fetch(STORAGE + "/object/upload/sign/" + BUCKET + "/" + path, { method: "POST", headers: svcHeaders(env), body: JSON.stringify({}) });
   if (!r.ok) { const e = new Error("UPLOADSIGN"); e.status = 502; throw e; }
   const d = await r.json();   // { url: "/object/upload/sign/recordings/<path>?token=..." }
@@ -51,6 +58,7 @@ async function signedUpload(env, path) {
 }
 // 删除 recordings 桶对象(service_role)。paths = 对象 key 数组。失败静默(清理性质,不阻断主流程)。
 async function svcDelete(env, paths) {
+  const { STORAGE } = sbApi(env);
   const list = (paths || []).filter(Boolean);
   if (!list.length) return;
   await fetch(STORAGE + "/object/" + BUCKET, { method: "DELETE", headers: svcHeaders(env), body: JSON.stringify({ prefixes: list }) }).catch(() => {});
@@ -148,7 +156,7 @@ async function deepseek(env, system, userText) {
 
 export async function onRequestPost({ request, env }) {
   try {
-    const gate = await requireMinutes(request); if (gate.resp) return gate.resp;
+    const gate = await requireMinutes(request, env); if (gate.resp) return gate.resp;
     const token = gate.token;
     const body = await request.json().catch(() => ({}));
     const action = body.action;
@@ -157,7 +165,7 @@ export async function onRequestPost({ request, env }) {
     if (action === "upload-url") {
       if (!env.SUPABASE_SERVICE_ROLE) return json({ error: "服务器未配置 SUPABASE_SERVICE_ROLE" }, 500);
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
-      const mine = await getMinute(token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
+      const mine = await getMinute(env, token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
       let ext = String(body.ext || (String(body.filename || "").split(".").pop()) || "m4a").toLowerCase().replace(/[^a-z0-9]/g, "");
       if (!EXT_OK.has(ext)) ext = "m4a";
       const path = "minutes/" + id + "/" + crypto.randomUUID() + "." + ext;
@@ -169,7 +177,7 @@ export async function onRequestPost({ request, env }) {
     if (action === "play-url") {
       if (!env.SUPABASE_SERVICE_ROLE) return json({ error: "服务器未配置 SUPABASE_SERVICE_ROLE" }, 500);
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
-      const mine = await getMinute(token, id); if (!mine || !mine.audio_path) return json({ error: "无录音" }, 404);
+      const mine = await getMinute(env, token, id); if (!mine || !mine.audio_path) return json({ error: "无录音" }, 404);
       const url = await signedDownload(env, mine.audio_path, 3600);
       return json({ ok: true, url });
     }
@@ -178,7 +186,7 @@ export async function onRequestPost({ request, env }) {
     if (action === "attach") {
       if (!env.SUPABASE_SERVICE_ROLE) return json({ error: "服务器未配置 SUPABASE_SERVICE_ROLE" }, 500);
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
-      const mine = await getMinute(token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
+      const mine = await getMinute(env, token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
       const path = String(body.path || "");
       if (!validAttachPath(id, path)) return json({ error: "非法的音频路径" }, 400);   // 必须严格是本纪要文件夹(upload-url 签发的),无穿越
       const ext = String(path.split(".").pop() || "").toLowerCase();
@@ -201,7 +209,7 @@ export async function onRequestPost({ request, env }) {
     if (action === "seg-url") {
       if (!env.SUPABASE_SERVICE_ROLE) return json({ error: "服务器未配置 SUPABASE_SERVICE_ROLE" }, 500);
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
-      const mine = await getMinute(token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
+      const mine = await getMinute(env, token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
       // 分段只在【录制中】(draft,未 attach)才收:已 uploaded/transcribing/transcribed/done 的纪要不再签发分片上传URL(防转写后仍能堆垃圾对象)
       if (mine.status !== "draft") return json({ error: "当前状态不接受分段上传" }, 409);
       // seq 上界:5h 上限 ÷ 3min ≈ 100 段,给 2× 余量封顶 200。超界(含 int4 溢出如 2147483648)一律拒:既防溢出插台账失败留下不可清理的孤儿对象,又封存储 DoS。
@@ -219,7 +227,7 @@ export async function onRequestPost({ request, env }) {
     if (action === "seg-list") {
       if (!env.SUPABASE_SERVICE_ROLE) return json({ error: "服务器未配置 SUPABASE_SERVICE_ROLE" }, 500);
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
-      const mine = await getMinute(token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
+      const mine = await getMinute(env, token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
       const rows = await rest("GET", token, "/minute_segments?minute_id=eq." + id + "&order=seq&select=seq,object_path");
       const segs = [];
       for (const r of (rows || [])) { const url = await signedDownload(env, r.object_path, 3600).catch(() => null); if (url) segs.push({ seq: r.seq, url }); }
@@ -233,7 +241,7 @@ export async function onRequestPost({ request, env }) {
       if (!dkey) return json({ error: "服务器未配置 DASHSCOPE_API_KEY(阿里百炼)。请在 CF Pages 环境变量添加后重新部署。" }, 500);
       const base = (env.DASHSCOPE_BASE || "https://dashscope.aliyuncs.com").replace(/\/+$/, "");
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
-      const m = await getMinute(token, id); if (!m) return json({ error: "纪要不存在或无权限" }, 404);
+      const m = await getMinute(env, token, id); if (!m) return json({ error: "纪要不存在或无权限" }, 404);
       if (!m.audio_path) return json({ error: "请先上传录音" }, 400);
       // 说话人分离按时长开关:阿里 Fun-ASR 开分离建议单文件 ≤2h;>2h 关分离(无分离时 ≤12h 可转)→ 只出文字。
       // 时长未知(=0,如上传的文件)默认开分离(多数是短音频);仅在明确 >2h 时关。
@@ -244,7 +252,7 @@ export async function onRequestPost({ request, env }) {
       if (ext && !EXT_OK.has(ext)) return json({ error: "音频格式 ." + ext + " 可能不被识别,请上传 mp3/m4a/wav/aac" }, 400);
       // 条件锁:仅 uploaded/failed 可转入 transcribing(并发/双击只有一个能抢到)
       const locked = await restSvc("PATCH", env, "/minutes?id=eq." + id + "&status=in.(uploaded,failed)", { status: "transcribing", asr_error: "", asr_task_id: "" }, "return=representation");
-      if (!Array.isArray(locked) || !locked.length) { const cur = await getMinute(token, id); return json({ ok: true, status: (cur && cur.status) || "unknown", task_id: (cur && cur.asr_task_id) || "", note: "已在转写或状态不可转写" }); }
+      if (!Array.isArray(locked) || !locked.length) { const cur = await getMinute(env, token, id); return json({ ok: true, status: (cur && cur.status) || "unknown", task_id: (cur && cur.asr_task_id) || "", note: "已在转写或状态不可转写" }); }
       try {
         const signed = await signedDownload(env, m.audio_path, 21600);   // 6h,覆盖排队+下载
         const sub = await fetch(base + "/api/v1/services/audio/asr/transcription", {
@@ -269,7 +277,7 @@ export async function onRequestPost({ request, env }) {
       if (!dkey) return json({ error: "服务器未配置 DASHSCOPE_API_KEY" }, 500);
       const base = (env.DASHSCOPE_BASE || "https://dashscope.aliyuncs.com").replace(/\/+$/, "");
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
-      const m = await getMinute(token, id); if (!m) return json({ error: "纪要不存在或无权限" }, 404);
+      const m = await getMinute(env, token, id); if (!m) return json({ error: "纪要不存在或无权限" }, 404);
       if (m.status !== "transcribing" || !m.asr_task_id) return json({ ok: true, status: m.status });
       const tr = await fetch(base + "/api/v1/tasks/" + m.asr_task_id, { headers: { authorization: "Bearer " + dkey } });
       const td = await tr.json().catch(() => ({}));
@@ -301,7 +309,7 @@ export async function onRequestPost({ request, env }) {
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
       const kind = body.kind;
       if (!AI_SYS[kind]) return json({ error: "未知 kind" }, 400);
-      const m = await getMinute(token, id); if (!m) return json({ error: "纪要不存在或无权限" }, 404);
+      const m = await getMinute(env, token, id); if (!m) return json({ error: "纪要不存在或无权限" }, 404);
       const lines = transcriptSegLines(m);
       const full = lines.join("\n");
       if (!full.trim()) return json({ error: "没有可用的转写文本,请先转写" }, 400);
@@ -345,7 +353,7 @@ export async function onRequestPost({ request, env }) {
     // ---------- AI 猜说话人:仅据对话内容(互相称呼/自报身份)推测真名,返回建议不落库,前端逐条采纳 ----------
     if (action === "guess-speakers") {
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
-      const m = await getMinute(token, id); if (!m) return json({ error: "纪要不存在或无权限" }, 404);
+      const m = await getMinute(env, token, id); if (!m) return json({ error: "纪要不存在或无权限" }, 404);
       const segs = Array.isArray(m.transcript_json) ? m.transcript_json : [];
       const speakers = [...new Set(segs.map(s => s.speaker).filter(x => x != null && x !== ""))];
       if (!speakers.length) return json({ ok: true, proposals: [] });   // 未分说话人(如 >2h 只出文字)
@@ -362,10 +370,10 @@ export async function onRequestPost({ request, env }) {
     if (action === "delete") {
       if (!env.SUPABASE_SERVICE_ROLE) return json({ error: "服务器未配置 SUPABASE_SERVICE_ROLE" }, 500);
       const id = parseInt(body.minuteId, 10); if (!id) return json({ error: "缺少 minuteId" }, 400);
-      const mine = await getMinute(token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
+      const mine = await getMinute(env, token, id); if (!mine) return json({ error: "纪要不存在或无权限" }, 404);
       const pfx = "minutes/" + id + "/";
       try {   // 清桶失败不阻断删行(对象成孤儿可重跑;私有桶无泄露);list 按文件夹取,不会误及 minutes/12/ 等同前缀号
-        const lr = await fetch(STORAGE + "/object/list/" + BUCKET, { method: "POST", headers: svcHeaders(env), body: JSON.stringify({ prefix: "minutes/" + id, limit: 1000 }) });
+        const lr = await fetch(sbApi(env).STORAGE + "/object/list/" + BUCKET, { method: "POST", headers: svcHeaders(env), body: JSON.stringify({ prefix: "minutes/" + id, limit: 1000 }) });
         const items = lr.ok ? await lr.json().catch(() => []) : [];
         await svcDelete(env, (Array.isArray(items) ? items : []).filter(it => it && it.name).map(it => pfx + it.name));
       } catch (e) {}

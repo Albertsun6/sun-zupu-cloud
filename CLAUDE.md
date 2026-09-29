@@ -16,10 +16,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 无 `package.json`、无构建、无 lint、无测试框架——这是有意的简单(纯 ESM + CDN 依赖:supabase-js / mermaid / echarts / lunar-javascript)。
 
-- **本地预览**:`python3 -m http.server 8000`,浏览器开 `http://localhost:8000`。需联网(CDN + Supabase)且要登录;`config.js` 已填真实 url/anon。
+- **本地预览**:先 `cp config.example.js config.js` 并填入你的 Supabase url/anon(`config.js` 已 gitignore);再 `python3 -m http.server 8000`,浏览器开 `http://localhost:8000`。需联网(CDN + Supabase)且要登录。
 - **部署**:`git push`(到 `Albertsun6/sun-zupu-cloud`)→ Cloudflare Pages 自动构建(Framework=None,Build command 留空,输出目录=仓库根)。无需 CLI。
 - **改版本必做(双改,否则 CF/浏览器缓存旧码)**:同时改 `app.js` 的 `APP_VERSION` 和 `index.html` 底部所有 `?v=x.y.z` 查询串。提交信息惯例见 `git log`(`feat:`/`fix:` + 一句中文 + `vX.Y.Z`)。
-- **Supabase 建表/改库**:在 Supabase SQL Editor **按序整段跑** `supabase/{migrations-registry,schema,policies,functions,relationships,minutes,minutes-v042,minutes-v047}.sql`(均幂等,可重复跑;registry 排第一——先有登记表,后续每份 SQL 的自登记行才落得下;`bootstrap-admin.sql` 是一次性初始化)。**此清单以 FEATURES.md §4.2 为单一真源,两处必须一致**(ship-checks 有校验)。**新 SQL 文件末尾必须加自登记行**(照抄既有文件末尾那两行,带 `to_regclass` 守卫、登记表未建时静默跳过;ship-checks 第 8 项强制)——线上跑没跑过靠 `node probes/check-migrations.mjs` 核对。Supabase 项目 ref `ktalsyrxueabdisrszde`(新加坡)。
+- **Supabase 建表/改库**:在 Supabase SQL Editor **按序整段跑** `supabase/{migrations-registry,schema,policies,functions,relationships,minutes,minutes-v042,minutes-v047}.sql`(均幂等,可重复跑;registry 排第一——先有登记表,后续每份 SQL 的自登记行才落得下;`bootstrap-admin.sql` 是一次性初始化)。**此清单以 FEATURES.md §4.2 为单一真源,两处必须一致**(ship-checks 有校验)。**新 SQL 文件末尾必须加自登记行**(照抄既有文件末尾那两行,带 `to_regclass` 守卫、登记表未建时静默跳过;ship-checks 第 8 项强制)——线上跑没跑过靠 `node probes/check-migrations.mjs` 核对。
 - **发版前跑门禁探针**:`bash probes/ship-checks.sh`(角色字面量/错误脱敏/I-O收口/版本双改/文档一致,FAIL 不发版;push/PR 时 GitHub Actions `.github/workflows/ci.yml` 也自动跑它 + `node --check` 全部 JS);动过 SQL 再跑 `node probes/check-migrations.mjs`(核对线上库漏没漏跑迁移);改过世代逻辑再跑 `ZUPU_EMAIL=.. ZUPU_PASSWORD=.. node probes/gen-parity.mjs`。
 - **一次性数据迁移**:`SUPABASE_URL=... SUPABASE_SERVICE_ROLE=... node scripts/migrate.mjs <导出JSON> <原谱目录>`(service_role 只在本地命令行用一次,绝不入库)。
 - **自动异地备份**:`backup-worker/`(独立 Cloudflare Worker,与 Pages 分开部署)每日 cron 把全量数据 JSON 写 R2 私有桶;secrets 只在 Worker 里,**只写 R2 绝不回传数据**。部署/恢复见 `backup-worker/README.md`。
@@ -53,7 +53,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### 鉴权 / 安全模型(动这块务必守住)
 - Supabase Auth 邮箱+密码;角色在 JWT `app_metadata.role` = `editor`(可写)/ `viewer`(只读,默认)。RLS:`authenticated` 可读、`editor` 可写(`policies.sql` + `relationships.sql`)。未登录(仅 anon)读不到任何行——**唯一记档例外:`schema_migrations`(迁移登记,只有 SQL 文件基名+时间戳,anon 可读供 `check-migrations` 探针无凭证核对)**。
 - **Pages 会把仓库根全部静态供网**(schema.sql/probes 曾实测可被公网下载):非前端文件已在 `_redirects` 里 302 回首页;**新增非前端目录时记得补一行**。仓库无密钥铁律不变,这里挡的是信息面。
-- **anon key 公开安全**(在 `config.js`,RLS 把门)。**service_role 铁律:绝不进前端/仓库/日志**;泄露立刻在 Supabase reset。
+- **anon key 公开安全**(本地在 gitignore 的 `config.js`,线上由 Pages Function 从环境变量输出;RLS 把门)。**service_role 铁律:绝不进前端/仓库/日志**;泄露立刻在 Supabase reset。
 - AI 批量识别走 **Cloudflare Pages Function** `functions/api/ai-parse.js`(代理 DeepSeek;key 存 CF 环境变量 `DEEPSEEK_API_KEY`;只放行已登录的 editor JWT)。
 - 照片为**公开桶** `photos`(对象名 uuid 不可枚举);文字数据仍受 RLS。原谱影像在桶内 `yuanpu/p1..p4.jpg`(文件夹用拼音)。
 - 敏感字段 `contact`/`address`:分享模式 / 分享版 HTML / 脱敏导出里自动隐去,历史 diff 打码。

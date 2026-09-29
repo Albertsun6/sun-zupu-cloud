@@ -4,11 +4,12 @@
 
 架构为属性图三层:**L1 人(节点,纯个人属性)/ L2 关系(独立边表)/ L3 派生(家族/世代/字辈/树/图谱)**。
 
-> 仓库**只含代码**,不含任何家谱数据或密钥(数据在 Supabase)。`config.js` 里的 anon key 是公开安全的;**service_role 密钥永不入库**。
+> 仓库**只含代码**,不含任何家谱数据或密钥(数据在 Supabase)。anon key 公开安全(靠 RLS 把门),本地写在 gitignore 的 `config.js`,线上由 Pages Function 从环境变量输出;**service_role 密钥永不入库**。
 
 ## 文件
 ```
-index.html app.js db.js config.js style.css   ← 静态前端(CF Pages 根目录)
+index.html app.js db.js style.css            ← 静态前端(CF Pages 根目录)
+config.example.js                            ← 本地配置示例(复制为 config.js,勿提交)
 supabase/  schema.sql policies.sql functions.sql  ← 在 Supabase SQL Editor 里跑
 scripts/   migrate.mjs                          ← 一次性数据迁移(本地跑)
 ```
@@ -26,14 +27,20 @@ scripts/   migrate.mjs                          ← 一次性数据迁移(本地
 5. Storage → 确认有名为 `photos` 的**公开**桶(policies.sql 已自动建);原谱影像放在桶内 **`yuanpu`** 文件夹(Supabase 文件夹用拼音,前端已对齐 `yuanpu/p1..p4.jpg`)。
 6. Settings → API 抄下 **Project URL** 和 **anon public key**。
 
-### 2. 填配置 + 发到 GitHub
-1. 把上一步的 URL / anon key 填进 `config.js`。
-2. `git add -A && git commit -m "set config" && git push`(本仓库)。
+### 2. 本地预览
+```bash
+cp config.example.js config.js   # 填入 Project URL 和 anon public key;config.js 已 gitignore
+python3 -m http.server 8000      # 浏览器开 http://localhost:8000(需联网+登录)
+```
 
 ### 3. Cloudflare Pages(连 GitHub 自动部署)
 1. https://dash.cloudflare.com → Workers & Pages → Create → Pages → **Connect to Git** → 选本仓库。
 2. 构建设置:Framework preset = **None**;Build command = **留空**(纯静态);Build output directory = **/**(仓库根)。
-3. Save & Deploy → 得到 `https://<项目>.pages.dev`。**不需要**配置 Cloudflare Access。
+3. **先**在该 Pages 项目 → **Settings → Environment variables** 添加(Production 必填;若开 Preview 部署也要加):
+   - `SUPABASE_URL` = Project URL
+   - `SUPABASE_ANON_KEY` = anon public key
+   已有的 `SUPABASE_SERVICE_ROLE` / AI key 保持不动。前端 `/config.js` 由 `functions/config.js.js` 从这两项动态输出,无需 build。
+4. Save & Deploy → 得到 `https://<项目>.pages.dev`。**不需要**配置 Cloudflare Access。**不要**把真实 `config.js` 提交进仓库。
 
 ### 4. 一次性导入现有数据(66 人 + 家史 + 4 张原谱)
 在本地仓库:

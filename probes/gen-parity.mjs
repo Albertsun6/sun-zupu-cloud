@@ -10,10 +10,16 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const EMAIL = process.env.ZUPU_EMAIL, PW = process.env.ZUPU_PASSWORD;
 if (!EMAIL || !PW) { console.error("需要 ZUPU_EMAIL / ZUPU_PASSWORD 环境变量(任一已确认账号)"); process.exit(2); }
 
-// 取 config.js 里的 url/anon(单一真源,不在本文件重复)
-const cfg = readFileSync(join(ROOT, "config.js"), "utf8");
-const SB_URL = (cfg.match(/url:\s*"([^"]+)"/) || [])[1];
-const SB_ANON = (cfg.match(/anon:\s*"([^"]+)"/) || [])[1];
+// url/anon:环境变量优先,否则读本地 gitignore 的 config.js
+function loadSb() {
+  let url = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+  let anon = String(process.env.SUPABASE_ANON_KEY || "");
+  if (url && anon) return { url, anon };
+  const cfg = readFileSync(join(ROOT, "config.js"), "utf8");
+  return { url: (cfg.match(/url:\s*"([^"]+)"/) || [])[1], anon: (cfg.match(/anon:\s*"([^"]+)"/) || [])[1] };
+}
+const { url: SB_URL, anon: SB_ANON } = loadSb();
+if (!SB_URL || !SB_ANON) { console.error("读不到 SUPABASE_URL / SUPABASE_ANON_KEY(环境变量或本地 config.js)"); process.exit(2); }
 
 async function req(method, path, body, tok) {
   const r = await fetch(SB_URL + path, { method, headers: { apikey: SB_ANON, "Content-Type": "application/json", ...(tok ? { Authorization: "Bearer " + tok } : {}) }, body: body ? JSON.stringify(body) : undefined });

@@ -12,7 +12,7 @@
 // 配置:CF Pages → Settings → Environment variables 添加 SUPABASE_SERVICE_ROLE(必填,service_role key)。
 //      另需在 Supabase → Auth 关闭"公开注册(Enable signups)",否则有人可自助注册绕过本函数。
 
-import { SB_URL, json, requireAdmin, roleOf, permsOf } from "./_shared.js";   // 门禁/常量统一走 _shared(原本函数的 requireAdmin 即其蓝本)
+import { sbCreds, json, requireAdmin, roleOf, permsOf } from "./_shared.js";   // 门禁/常量统一走 _shared(原本函数的 requireAdmin 即其蓝本)
 
 const ROLES = new Set(["admin", "editor", "viewer"]);
 const PERMS = new Set(["minutes"]);
@@ -21,7 +21,8 @@ function admHeaders(env) { const k = env.SUPABASE_SERVICE_ROLE; return { apikey:
 
 // 调 GoTrue Admin API;失败抛错但不外泄上游响应体
 async function adm(env, method, path, body) {
-  const r = await fetch(SB_URL + "/auth/v1" + path, { method, headers: admHeaders(env), body: body ? JSON.stringify(body) : undefined });
+  const { url } = sbCreds(env);
+  const r = await fetch(url + "/auth/v1" + path, { method, headers: admHeaders(env), body: body ? JSON.stringify(body) : undefined });
   const txt = await r.text(); let data = null; try { data = txt ? JSON.parse(txt) : null; } catch (e) {}
   if (!r.ok) { console.warn("GoTrue admin " + method + " " + path + " -> " + r.status, txt.slice(0, 200)); const e = new Error("AUTH_ADMIN"); e.status = r.status; throw e; }
   return data;
@@ -54,7 +55,7 @@ export async function onRequestPost({ request, env }) {
   try {
     if (!env.SUPABASE_SERVICE_ROLE)
       return json({ error: "服务器未配置 SUPABASE_SERVICE_ROLE。请在 Cloudflare Pages → Settings → Environment variables 添加后重新部署。" }, 500);
-    const gate = await requireAdmin(request); if (gate.resp) return gate.resp;   // ← 任何 service_role 调用之前先过管理员校验
+    const gate = await requireAdmin(request, env); if (gate.resp) return gate.resp;   // ← 任何 service_role 调用之前先过管理员校验
     const caller = gate.user;
     const body = await request.json().catch(() => ({}));
     const action = body.action;

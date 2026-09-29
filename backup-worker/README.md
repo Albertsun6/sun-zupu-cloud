@@ -14,6 +14,7 @@
 2. **建 Worker**:Workers & Pages → Create → Worker,名字 `zupu-backup`,把 `worker.js` 全文粘进编辑器,Deploy。
 3. **绑定 R2**:该 Worker → Settings → Bindings → Add → R2 bucket,Variable name 填 `BACKUP_BUCKET`,选桶 `zupu-backups`。
 4. **加 secret**:该 Worker → Settings → Variables and Secrets →
+   - `SUPABASE_URL`(Secret)= 你的 Supabase Project URL(与 Pages 里那份同一个)。
    - `SUPABASE_SERVICE_ROLE`(Secret)= 你的 Supabase service_role key(与 Pages 里那份同一个)。
    - `BACKUP_TOKEN`(Secret)= 自己随便定一串长随机字符串(仅用于 `/run` 手动测试)。
 5. **加 cron**:该 Worker → Settings → Triggers → Cron Triggers → Add → `0 19 * * *`(每日北京 03:00)。
@@ -23,6 +24,7 @@
 ```
 npx wrangler r2 bucket create zupu-backups
 cd backup-worker && npx wrangler deploy
+npx wrangler secret put SUPABASE_URL
 npx wrangler secret put SUPABASE_SERVICE_ROLE
 npx wrangler secret put BACKUP_TOKEN
 ```

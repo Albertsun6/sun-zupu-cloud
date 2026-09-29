@@ -1,6 +1,10 @@
 # Cloudflare Pages 会把仓库根全部静态供网(实测 schema.sql/probes 都能被公网下载)。
 # 非前端文件一律 302 回首页——仓库本就无密钥(铁律),这里挡的是信息面(表结构/策略/内部报告)。
 # 新增非前端目录时记得补一行。
+#
+# /config.js 由 Functions 动态输出(functions/config.js.js);若该文件路由未命中,
+# 200 回写到 /config(functions/config.js)兜底。本地 python 服务器不读本文件,仍用磁盘上的 config.js。
+/config.js /config 200
 /supabase/* / 302
 /probes/* / 302
 /backup-worker/* / 302

@@ -31,7 +31,7 @@ const SYSTEM = `你是中文族谱/人物信息抽取助手。用户给你一段
 export async function onRequestPost({ request, env }) {
   try {
     // 1) 校验调用者 = 已登录 editor/admin(_shared 统一门禁,含 aud 校验)
-    const gate = await requireWrite(request); if (gate.resp) return gate.resp;
+    const gate = await requireWrite(request, env); if (gate.resp) return gate.resp;
 
     // 2) 文本
     const body = await request.json().catch(() => ({}));
