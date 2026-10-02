@@ -56,3 +56,17 @@ node scripts/migrate.mjs <导出JSON路径> "<含 p1..p4.jpg 的原谱目录>"
 - **照片**:`photos` 为公开桶(图片 URL 可直接访问,对象名用 uuid 不可枚举);文字数据仍受 RLS 保护。要更严可改私有桶 + 签名URL(db.js 的 `photoUrl` 留了切换点)。
 - **大陆访问**:CF Pages 与 Supabase 是境外基建,大陆**常能用但不保证稳定**,且无 ICP 备案。要保证稳定需自有域名 + 备案(另起方案)。**建议定期点"备份JSON"留底**,数据不被锁死。
 - **备份/恢复**:备份 = 点"备份JSON"下载;恢复 = 操作历史页"上传JSON恢复"(覆盖全部,先备份)。Supabase 平台另有自动备份。
+
+---
+
+## 查人接口(给聊天助手)
+
+服务端到服务端的只读查询,浏览器登录态用不上。
+
+- `GET /api/person?name=姓名` — 先精确匹配姓名/字号,没有再模糊;重名返回候选列表
+- `GET /api/person?id=S001` — 按稳定 ID 精确查一人
+- 请求头:`Authorization: Bearer <PERSON_API_TOKEN>`
+- 没配令牌或令牌不对 → 一律 401(fail-closed)。不开放 CORS。
+- 默认不返回 `contact`/`address`;照片是 photos 桶 **1 小时签名 URL**(没有照片则为 `null`)
+
+Cloudflare Pages(建议只配 **Preview**)需要:`PERSON_API_TOKEN`(Secret)、`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE`(Secret,与现有纪要/用户管理同名)。完整参数、字段清单、样例见 [`docs/person-api.md`](docs/person-api.md)。

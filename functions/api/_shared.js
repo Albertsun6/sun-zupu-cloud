@@ -44,3 +44,25 @@ export async function upstreamError(label, res) {
   err.status = 502; err.msg = err.message;
   return err;
 }
+
+// 服务令牌门禁(查人接口等 server-to-server):先 SHA-256 再逐字节 XOR,比较时间与原文长度无关。
+// 未配置 expected → 一律 401(fail-closed,与错令牌同文案,避免探测"配没配")。
+export async function timingSafeEqualStr(a, b) {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(String(a ?? ""))),
+    crypto.subtle.digest("SHA-256", enc.encode(String(b ?? ""))),
+  ]);
+  const ua = new Uint8Array(ha), ub = new Uint8Array(hb);
+  let diff = 0;
+  for (let i = 0; i < ua.length; i++) diff |= ua[i] ^ ub[i];
+  return diff === 0;
+}
+export async function requireServiceToken(request, expected) {
+  const raw = (request && request.headers && request.headers.get("authorization")) || "";
+  const token = raw.replace(/^Bearer\s+/i, "");
+  if (!expected || !(await timingSafeEqualStr(token, expected))) {
+    return { resp: json({ error: "未授权" }, 401) };
+  }
+  return { ok: true };
+}
