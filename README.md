@@ -71,15 +71,15 @@ node scripts/migrate.mjs <导出JSON路径> "<含 p1..p4.jpg 的原谱目录>"
 
 Cloudflare Pages(建议只配 **Preview**)需要:`PERSON_API_TOKEN`(Secret)、`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE`(Secret,与现有纪要/用户管理同名)。完整参数、字段清单、样例见 [`docs/person-api.md`](docs/person-api.md)。
 
-## 写人接口(给聊天助手,第一版)
+## 写人接口(给聊天助手)
 
 服务端到服务端写入,和只读查人用**两枚不同令牌**。读令牌不能写;没配写令牌时写接口一律 401。
 
-- `POST /api/person` — 新建(姓名必填;同名先回候选,带 `confirm=true` 才强制新建)
+- `POST /api/person` — 新建(姓名必填;同名先回候选,带 `confirm=true` 才强制新建;可顺带 `father_id` / `spouse_id`)
 - `PATCH /api/person?id=` — 部分改字段
-- `POST /api/person/relation` — 挂/改父子边(规则同网页 `reconcileFatherEdge`,不写退役列)
-- `DELETE /api/person?id=` — 软删; `?purge=1` 彻底删
-- 每次写入按网页 `logHist` 记 history,说明带 `[聊天助手]`,可在网页「操作历史」撤销
-- 配偶 / 存照片是第二版(`POST /api/person/photo` 现回 501)
+- `POST /api/person/relation` — 挂/改父子(`type=father`)或挂/解除配偶(`type=spouse`);不写退役列
+- `POST /api/person/photo` — 存照片(base64 或 https URL);`DELETE ?media_id=` 删照片,`purge=1` 连桶一起删
+- `DELETE /api/person?id=` — 软删; `?purge=1` 彻底删(含桶里的照片)
+- 每次写入按网页 `logHist` 记 history,说明带 `[聊天助手]`
 
-Cloudflare Pages Preview 另需 **`PERSON_WRITE_TOKEN`**(Secret,与 `PERSON_API_TOKEN` 分开)。说明、样例、主人配置步骤见 [`docs/person-write-api.md`](docs/person-write-api.md)。真实写入脚本(不进 CI):`probes/person-write-live.mjs`。
+Cloudflare Pages Preview 另需 **`PERSON_WRITE_TOKEN`**(Secret,与 `PERSON_API_TOKEN` 分开)。说明见 [`docs/person-write-api.md`](docs/person-write-api.md)。真实写入脚本(不进 CI,建议 `PERSON_WRITE_BASE` 用分支别名):`probes/person-write-live.mjs`。

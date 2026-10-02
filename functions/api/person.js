@@ -3,6 +3,7 @@
 //      POST   /api/person                                   —— 新建,PERSON_WRITE_TOKEN
 //      PATCH  /api/person?id=…                              —— 部分更新,PERSON_WRITE_TOKEN
 //      DELETE /api/person?id=…                              —— 软删;?purge=1 彻底删
+//      POST   /api/person/relation  PATCH 响应的 father/spouses 从边现查
 // 写逻辑在 _person-write.js(本文件只挂方法,GET 行为保持原样)。
 // 只读鉴权:Authorization: Bearer <PERSON_API_TOKEN>(不是登录 JWT;读令牌不能写)
 // 写入鉴权:Authorization: Bearer <PERSON_WRITE_TOKEN>(未配置一律 401,fail-closed)
