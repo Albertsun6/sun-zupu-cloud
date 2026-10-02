@@ -28,6 +28,8 @@ jobs:
           echo "all JS/MJS syntax OK"
       - name: probes/person-api.mjs(查人接口假数据单测)
         run: node probes/person-api.mjs
+      - name: probes/person-write-api.mjs(写人接口假数据单测,不断真库)
+        run: node probes/person-write-api.mjs
       # 线上库漏跑迁移核对:只用仓库里的公开 anon key,无需 secret。
       # 提醒性(continue-on-error):新 SQL 合进 main 到用户在 Supabase 跑它之间,这步黄着提醒,不把整个 CI 弄红。
       - name: check-migrations(线上库 vs 仓库 SQL;提醒性不挡门)

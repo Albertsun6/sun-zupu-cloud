@@ -1,12 +1,18 @@
-// Cloudflare Pages Function —— 查人接口(给主人的聊天助手,server-to-server)
-// 路由:GET /api/person?name=…  或  GET /api/person?id=…
-// 鉴权:Authorization: Bearer <PERSON_API_TOKEN>(独立查询令牌,不是登录 JWT)
-//      令牌未配置 → 一律 401(fail-closed)。不开放 CORS。
-// 数据:用 SUPABASE_SERVICE_ROLE + SUPABASE_URL(均只从 CF 环境变量读)只读查库。
-//      不返回 contact/address;照片走 photos 桶 1 小时签名 URL。
-// 配置(建议只配 Preview,不动 Production):PERSON_API_TOKEN、SUPABASE_URL、SUPABASE_SERVICE_ROLE。
+// Cloudflare Pages Function —— 查人 / 写人接口(给主人的聊天助手,server-to-server)
+// 路由:GET    /api/person?name=…  或  GET /api/person?id=…     —— 只读,PERSON_API_TOKEN
+//      POST   /api/person                                   —— 新建,PERSON_WRITE_TOKEN
+//      PATCH  /api/person?id=…                              —— 部分更新,PERSON_WRITE_TOKEN
+//      DELETE /api/person?id=…                              —— 软删;?purge=1 彻底删
+//      POST   /api/person/relation  PATCH 响应的 father/spouses 从边现查
+// 写逻辑在 _person-write.js(本文件只挂方法,GET 行为保持原样)。
+// 只读鉴权:Authorization: Bearer <PERSON_API_TOKEN>(不是登录 JWT;读令牌不能写)
+// 写入鉴权:Authorization: Bearer <PERSON_WRITE_TOKEN>(未配置一律 401,fail-closed)
+// 数据:用 SUPABASE_SERVICE_ROLE + SUPABASE_URL(均只从 CF 环境变量读)。
+//      GET 不返回 contact/address;照片走 photos 桶 1 小时签名 URL。
+// 配置(建议先配 Preview):PERSON_API_TOKEN、PERSON_WRITE_TOKEN、SUPABASE_URL、SUPABASE_SERVICE_ROLE。
 
 import { json, requireServiceToken, upstreamError } from "./_shared.js";
+import { handlePersonWriteRequest, handlePersonDeleteRequest } from "./_person-write.js";
 
 export const PHOTO_SIGN_EXPIRES = 3600;
 export const CANDIDATE_LIMIT = 20;
@@ -289,4 +295,16 @@ export async function handlePersonRequest({ request, env }, deps) {
 
 export async function onRequestGet(context) {
   return handlePersonRequest(context);
+}
+
+export async function onRequestPost(context) {
+  return handlePersonWriteRequest(context);
+}
+
+export async function onRequestPatch(context) {
+  return handlePersonWriteRequest(context);
+}
+
+export async function onRequestDelete(context) {
+  return handlePersonDeleteRequest(context);
 }
