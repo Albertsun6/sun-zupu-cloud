@@ -1,6 +1,6 @@
 # 查人接口 `GET /api/person`
 
-给主人的聊天助手用的**只读**查询。调用方是服务器到服务器,不是浏览器。
+给主人的聊天助手用的**只读**查询。调用方是服务器到服务器,不是浏览器。写入见 [`docs/person-write-api.md`](person-write-api.md)(另一枚 `PERSON_WRITE_TOKEN`,读令牌不能写)。
 
 线上正式域:`https://sun-zupu-cloud.pages.dev`  
 预览域:Cloudflare Pages 给分支部署的 `*.pages.dev`(见对应 PR)。
